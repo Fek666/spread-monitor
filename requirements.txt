@@ -1,0 +1,5 @@
+aiohttp>=3.9.0
+yfinance>=0.2.36
+python-dotenv>=1.0.0
+flask>=3.0.0
+gunicorn>=21.2.0

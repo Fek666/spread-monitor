@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spread Monitor — MEXC vs Stock</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
+  :root {
+    --bg:#0a0c0f; --bg2:#11141a; --bg3:#181c24;
+    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.14);
+    --text:#e8ecf0; --muted:#5a6270; --muted2:#8a93a0;
+    --green:#00e676; --red:#ff4444; --amber:#ffab40; --accent:#7c6af5;
+    --blue:#40c4ff;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',monospace;font-size:14px;min-height:100vh;line-height:1.5}
+
+  /* ── HEADER ── */
+  header{display:flex;align-items:center;justify-content:space-between;padding:12px 22px;border-bottom:1px solid var(--border);background:var(--bg2);position:sticky;top:0;z-index:100;gap:10px;flex-wrap:wrap}
+  .logo{display:flex;align-items:center;gap:9px;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+  .logo-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .header-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .header-meta{display:flex;align-items:center;gap:14px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
+  #status-badge{padding:3px 10px;border-radius:20px;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--green);color:var(--green);background:rgba(0,230,118,0.07)}
+  #status-badge.error{border-color:var(--red);color:var(--red);background:rgba(255,68,68,0.07)}
+  #status-badge.starting{border-color:var(--amber);color:var(--amber);background:rgba(255,171,64,0.07)}
+
+  /* ── BUTTONS ── */
+  .btn{display:flex;align-items:center;gap:6px;padding:6px 13px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted2);font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;user-select:none;letter-spacing:.04em;white-space:nowrap}
+  .btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .btn.active{border-color:var(--accent);color:var(--accent);background:rgba(124,106,245,0.1)}
+  .btn:disabled{opacity:.45;cursor:not-allowed;border-color:var(--border)}
+
+  /* Refresh button states */
+  #refresh-btn.ready{border-color:var(--blue);color:var(--blue);background:rgba(64,196,255,0.07)}
+  #refresh-btn.ready:hover{border-color:var(--blue);color:#fff;background:rgba(64,196,255,0.18)}
+  #refresh-btn.cooldown{border-color:var(--border);color:var(--muted);cursor:not-allowed}
+
+  /* cooldown arc */
+  .refresh-icon{position:relative;width:14px;height:14px;flex-shrink:0}
+  .refresh-icon svg{position:absolute;top:0;left:0;transform:rotate(-90deg)}
+  .arc-bg{fill:none;stroke:rgba(255,255,255,0.1);stroke-width:2}
+  .arc-fill{fill:none;stroke:var(--blue);stroke-width:2;stroke-linecap:round;transition:stroke-dashoffset .9s linear}
+
+  /* ── LEGEND ── */
+  .legend{display:flex;align-items:center;gap:12px;font-family:'IBM Plex Mono',monospace;font-size:10px}
+  .legend-item{display:flex;align-items:center;gap:5px;color:var(--muted)}
+  .legend-dot{width:7px;height:7px;border-radius:50%}
+
+  /* ── LAYOUT ── */
+  main{padding:16px 22px;max-width:1440px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;align-items:start}
+  .main-col{min-width:0}
+  .side-col{display:flex;flex-direction:column;gap:14px;position:sticky;top:66px}
+  .panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px}
+  .panel h3{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+  .card-header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;align-items:start;margin-bottom:10px}
+  .card-actions{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-shrink:0}
+  .icon-btn{width:20px;height:20px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted2);border-radius:4px;cursor:pointer;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+  .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .open-columns{display:flex;flex-direction:column;gap:10px}
+  .open-column{border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg3)}
+  .card-badges{display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end;grid-column:2;grid-row:1}
+  .ticker-name{grid-column:1;grid-row:1}
+  .card-actions{grid-column:2;grid-row:1}
+  .card-meta{grid-column:1 / -1;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .spread-row{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;justify-content:space-between}
+  .spread-value{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;line-height:1;transition:color .3s;white-space:nowrap}
+  .spread-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+  .ticker-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;position:relative;overflow:hidden;transition:border-color .2s,transform .15s}
+  .ticker-card:hover{transform:translateY(-1px);border-color:var(--border2)}
+  .ticker-card .card-hide-btn{position:static;display:inline-flex;width:20px;height:20px}
+  .ticker-card .card-open-btn{display:inline-flex;width:20px;height:20px}
+  .ticker-card:hover .card-hide-btn,.ticker-card:hover .card-open-btn{display:inline-flex}
+  .ticker-card:hover .card-actions .icon-btn{opacity:1}
+  .ticker-card .card-actions .icon-btn{opacity:.78;transition:opacity .15s}
+  .note-card{border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg3);display:flex;flex-direction:column;gap:6px}
+  .note-input,.note-text{width:100%;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px;font-family:'IBM Plex Sans',sans-serif;font-size:12px}
+  .note-text{min-height:88px;resize:vertical}
+  .note-row{display:flex;gap:8px;align-items:center}
+  .news-list{display:flex;flex-direction:column;gap:8px}
+  .news-item{font-size:12px;line-height:1.35;border-bottom:1px solid var(--border);padding-bottom:8px}
+  .news-item a{color:var(--blue);text-decoration:none}
+  .trend-pill{display:inline-flex;padding:2px 6px;border-radius:4px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+  .trend-converging{background:rgba(0,230,118,.12);color:#00e676}
+  .trend-widening{background:rgba(255,68,68,.12);color:#ff4444}
+  .trend-flat{background:rgba(255,171,64,.12);color:#ffab40}
+  .trend-unknown{background:rgba(90,98,112,.18);color:var(--muted2)}
+  .history-table{width:100%;border-collapse:collapse;font-size:11px}
+  .history-table th,.history-table td{border-bottom:1px solid var(--border);padding:6px 4px;text-align:left}
+  .history-table td:last-child{text-align:right}
+  .trash-list{display:flex;flex-direction:column;gap:6px}
+  .trash-item{display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 8px}
+  .ticker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:9px;margin-bottom:26px}
+  .ticker-card{cursor:pointer;position:relative}
+  .ticker-card .card-actions .icon-btn{background:var(--bg2)}
+  .ticker-card .card-actions .icon-btn:hover{background:rgba(124,106,245,0.1)}
+  .ticker-card .card-open-btn{color:var(--blue)}
+  .ticker-card .card-hide-btn{color:var(--red)}
+  .ticker-card .card-open-btn:hover{border-color:var(--blue);color:var(--blue)}
+  .ticker-card .card-hide-btn:hover{border-color:var(--red);color:var(--red)}
+  .ticker-card .card-badges{grid-column:1 / -1;justify-content:flex-start}
+  .ticker-card .card-meta{grid-column:1 / -1}
+  .ticker-card .spread-row{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .ticker-card .spread-value{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;line-height:1;white-space:nowrap}
+  .ticker-card .spread-label{white-space:nowrap}
+  .ticker-card .card-actions{margin-left:auto}
+  .ticker-card .card-open-btn,.ticker-card .card-hide-btn{display:inline-flex}
+  .ticker-card .card-actions{flex-shrink:0}
+  .ticker-card .card-actions .icon-btn{font-family:'IBM Plex Mono',monospace}
+  .ticker-grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+  .config-bar{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
+  .config-pill{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 11px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted2)}
+  .config-pill span{color:var(--accent);font-weight:600}
+  .sort-info{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:9px}
+  .sort-info span{color:var(--accent)}
+  .section-title{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:11px;display:flex;align-items:center;gap:8px}
+  .section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+
+  /* ── TICKER GRID ── */
+  .ticker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:9px;margin-bottom:26px}
+
+  .ticker-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;position:relative;overflow:hidden;transition:border-color .2s,transform .15s}
+  .ticker-card:hover{transform:translateY(-1px);border-color:var(--border2)}
+  .ticker-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--muted);transition:background .4s}
+  .ticker-card.tier-red::before   {background:#ff4444}
+  .ticker-card.tier-yellow::before{background:#ffab40}
+  .ticker-card.tier-green::before {background:#00e676}
+  .ticker-card.tier-red   {border-color:rgba(255,68,68,0.2)}
+  .ticker-card.tier-green {border-color:rgba(0,230,118,0.2)}
+  .ticker-card.error{opacity:.4}
+
+  .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .ticker-name{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;letter-spacing:.04em;color:var(--text)}
+  .card-badges{display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+
+  .rank-badge{font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;letter-spacing:.05em;text-transform:uppercase}
+  .rank-badge.tier-red   {background:rgba(255,68,68,0.15);  color:#ff4444}
+  .rank-badge.tier-yellow{background:rgba(255,171,64,0.15); color:#ffab40}
+  .rank-badge.tier-green {background:rgba(0,230,118,0.15);  color:#00e676}
+  .rank-badge.tier-none  {background:rgba(90,98,112,0.15);  color:var(--muted)}
+
+  .lev-badge{font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;letter-spacing:.04em;background:rgba(64,196,255,0.1);color:var(--blue);white-space:nowrap}
+  .split-badge{font-size:8px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(124,106,245,0.12);color:var(--accent);letter-spacing:.03em}
+  .sess-badge{font-size:8px;font-weight:600;padding:1px 6px;border-radius:4px;letter-spacing:.04em;text-transform:uppercase}
+  .sess-badge.premarket  {background:rgba(255,171,64,0.13); color:#ffab40}
+  .sess-badge.regular    {background:rgba(0,230,118,0.13);  color:#00e676}
+  .sess-badge.postmarket {background:rgba(64,196,255,0.13); color:#40c4ff}
+  .sess-badge.overnight  {background:rgba(90,98,112,0.18);  color:#8a93a0}
+  .sess-badge.post-fri   {background:rgba(64,196,255,0.1);  color:#40c4ff}
+
+  .price-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;font-family:'IBM Plex Mono',monospace}
+  .price-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .price-value{font-size:12px;font-weight:500;color:var(--muted2)}
+
+  .spread-row{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;align-items:baseline;gap:6px}
+  .spread-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .spread-value{font-family:'IBM Plex Mono',monospace;font-size:19px;font-weight:600;line-height:1;transition:color .3s}
+  .spread-value.tier-red   {color:#ff4444}
+  .spread-value.tier-yellow{color:#ffab40}
+  .spread-value.tier-green {color:#00e676}
+  .spread-value.tier-none  {color:var(--muted2)}
+
+  .spread-bar{height:3px;border-radius:2px;background:var(--bg3);margin-top:6px;overflow:hidden}
+  .spread-fill{height:100%;border-radius:2px;transition:width .5s ease,background .3s}
+  .time-stamp{font-size:10px;color:var(--muted);margin-top:7px;font-family:'IBM Plex Mono',monospace}
+
+  /* ── AVG SPREAD ROWS ── */
+  .avg-row{display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;font-family:'IBM Plex Mono',monospace}
+  .avg-label{font-size:9px;color:var(--muted);letter-spacing:.04em}
+  .avg-value{font-size:10px;font-weight:500;color:var(--muted2)}
+  .avg-value.pos{color:rgba(0,230,118,0.75)}
+  .avg-value.neg{color:rgba(255,68,68,0.75)}
+
+  /* ── WATCHLIST PANEL ── */
+  .watchlist-panel{position:fixed;top:0;right:-340px;width:320px;height:100vh;background:var(--bg2);border-left:1px solid var(--border2);z-index:200;display:flex;flex-direction:column;transition:right .25s ease;box-shadow:-8px 0 30px rgba(0,0,0,.4)}
+  .watchlist-panel.open{right:0}
+  .watchlist-panel-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .watchlist-panel-title{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text)}
+  .watchlist-panel-close{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:2px 6px;border-radius:4px}
+  .watchlist-panel-close:hover{color:var(--text)}
+  .watchlist-section{padding:12px 16px;flex:1;overflow-y:auto}
+  .watchlist-section-label{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .watchlist-hidden-list{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+  .watchlist-hidden-item{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:7px}
+  .watchlist-hidden-item span{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--muted2)}
+  .watchlist-restore-btn{font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid var(--border2);background:none;color:var(--accent);cursor:pointer}
+  .watchlist-restore-btn:hover{background:rgba(124,106,245,0.12)}
+  .watchlist-empty{font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace;text-align:center;padding:20px 0}
+
+  /* ── HIDE BUTTON ON CARD HOVER ── */
+  .ticker-card .card-hide-btn{position:absolute;top:7px;right:7px;background:rgba(255,68,68,0.12);border:1px solid rgba(255,68,68,0.25);color:rgba(255,68,68,0.6);width:18px;height:18px;border-radius:4px;font-size:11px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;z-index:10;transition:all .15s}
+  .ticker-card:hover .card-hide-btn{display:flex}
+  .ticker-card .card-hide-btn:hover{background:rgba(255,68,68,0.25);color:#ff4444}
+
+  /* ── ALERTS ── */
+  .alert-count{background:rgba(255,171,64,0.15);color:var(--amber);font-size:10px;padding:1px 7px;border-radius:10px}
+  .alerts-list{display:flex;flex-direction:column;gap:5px}
+  .alert-row{display:flex;align-items:center;gap:11px;padding:8px 13px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;animation:slide-in .3s ease-out}
+  @keyframes slide-in{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+  .alert-row.premium{border-left:3px solid var(--green)}
+  .alert-row.discount{border-left:3px solid var(--red)}
+  .alert-time{color:var(--muted);font-size:11px;min-width:56px}
+  .alert-ticker{font-weight:600;min-width:48px}
+  .alert-spread-val{font-weight:600}
+  .alert-spread-val.positive{color:var(--green)}
+  .alert-spread-val.negative{color:var(--red)}
+  .alert-prices{color:var(--muted2);font-size:11px;flex:1}
+  .alert-dir{font-size:9px;padding:2px 8px;border-radius:4px;font-weight:600;letter-spacing:.06em}
+  .alert-dir.premium{background:rgba(0,230,118,0.1);color:var(--green)}
+  .alert-dir.discount{background:rgba(255,68,68,0.1);color:var(--red)}
+  .no-alerts{text-align:center;padding:34px 0;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:8px}
+
+  /* ── MODAL ─────────────────────────────────────────────────── */
+  .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+  .modal-overlay.open{display:flex}
+  .modal{background:var(--bg2);border:1px solid var(--border2);border-radius:14px;width:min(96vw,980px);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+  .modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .modal-title{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;letter-spacing:.04em}
+  .modal-title span{color:var(--accent)}
+  .modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:2px 6px;border-radius:4px;transition:color .15s}
+  .modal-close:hover{color:var(--text)}
+  .modal-toolbar{display:flex;align-items:center;gap:8px;padding:12px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .modal-toolbar .btn{font-size:11px;padding:5px 13px}
+  .modal-toolbar .btn.active{border-color:var(--accent);color:var(--accent);background:rgba(124,106,245,0.1)}
+  .modal-body{flex:1;overflow:hidden;padding:16px 20px;min-height:380px;position:relative}
+  .modal-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.05em}
+  .modal-stats{display:flex;gap:18px;flex-wrap:wrap;padding:0 20px 14px;flex-shrink:0}
+  .stat-item{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
+  .stat-item span{color:var(--text);font-weight:600}
+  .stat-item span.pos{color:#00e676}
+  .stat-item span.neg{color:#ff4444}
+  canvas#chart{width:100%;height:100%}
+  .ticker-card{cursor:pointer}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    MEXC / Stock Spread Monitor
+  </div>
+  <div class="header-right">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#ff4444"></div>Top 5 largest</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ffab40"></div>Middle</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#00e676"></div>Top 5 smallest</div>
+    </div>
+
+    <!-- FORCE REFRESH BUTTON -->
+    <button class="btn ready" id="refresh-btn" onclick="forceRefresh()">
+      <span class="refresh-icon">
+        <svg viewBox="0 0 14 14" width="14" height="14">
+          <circle class="arc-bg" cx="7" cy="7" r="5"/>
+          <circle class="arc-fill" id="arc" cx="7" cy="7" r="5"
+            stroke-dasharray="31.4" stroke-dashoffset="31.4"/>
+        </svg>
+        <!-- static icon when ready -->
+        <span id="refresh-static" style="position:absolute;top:0;left:0;width:14px;height:14px;display:flex;align-items:center;justify-content:center;font-size:11px">↻</span>
+      </span>
+      <span id="refresh-label">Refresh now</span>
+    </button>
+
+    <!-- SORT BUTTON -->
+    <button class="btn" id="sort-btn" onclick="toggleSort()">
+      <span id="sort-icon">⇅</span>
+      <span id="sort-label">Sort by spread</span>
+    </button>
+
+    <!-- WATCHLIST BUTTON -->
+    <button class="btn" id="watchlist-btn" onclick="toggleWatchlist()">
+      👁 Watchlist
+    </button>
+
+    <div class="header-meta">
+      <span id="last-update">—</span>
+      <span id="status-badge" class="starting">Starting…</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="main-col">
+  <div class="config-bar" id="config-bar"></div>
+  <div class="sort-info" id="sort-info" style="display:none">Sorted by <span>|spread|</span> — largest first</div>
+
+  <div class="section-title">Live Tickers</div>
+  <div style="margin-bottom:12px;">
+    <input id="ticker-search" type="text" placeholder="Search tickers…"
+      oninput="filterTickers(this.value)"
+      style="
+        width:100%; padding:8px 14px;
+        background:var(--bg2); border:1px solid var(--border2);
+        border-radius:7px; color:var(--text);
+        font-family:'IBM Plex Mono',monospace; font-size:12px;
+        outline:none; transition:border-color .15s;
+      "
+      onfocus="this.style.borderColor='var(--accent)'"
+      onblur="this.style.borderColor='var(--border2)'"
+    />
+  </div>
+  <div class="ticker-grid" id="ticker-grid"></div>
+
+  <div class="section-title">
+    Alerts
+    <span class="alert-count" id="alert-count">0</span>
+  </div>
+  <div class="alerts-list" id="alerts-list">
+    <div class="no-alerts">No alerts yet — watching for spreads above threshold…</div>
+  </div>
+  </div>
+  <aside class="side-col">
+    <div class="panel">
+      <h3>Open columns</h3>
+      <div class="open-columns" id="open-columns"></div>
+    </div>
+    <div class="panel">
+      <h3>Notes</h3>
+      <div id="notes-list"></div>
+      <button class="btn" style="margin-top:10px" onclick="addNote()">+ Note</button>
+    </div>
+    <div class="panel">
+      <h3>Trash</h3>
+      <div class="trash-list" id="trash-list"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let sortBySpread = false;
+let lastAlertIds = new Set();
+let lastConfig = null;
+let leverageData = {};
+window._lastSnapshots = {};
+let hiddenTickers = new Set();
+let showMA20 = true;
+let watchlistOpen = false;
+let openColumns = [];
+let notes = [];
+let trash = [];
+let newsCache = {};
+// avg spread cache: ticker → {avg7, avg30}
+let avgSpreadCache = {};
+
+// ── REFRESH BUTTON ──────────────────────────────────────────────
+let refreshCooldown = 0;   // seconds remaining
+let refreshTimer = null;
+const CIRCUMFERENCE = 2 * Math.PI * 5; // r=5
+
+function updateRefreshBtn(remaining, total) {
+  const btn    = $('refresh-btn');
+  const label  = $('refresh-label');
+  const arc    = $('arc');
+  const icon   = $('refresh-static');
+
+  if (remaining <= 0) {
+    btn.className = 'btn ready';
+    btn.disabled  = false;
+    label.textContent = 'Refresh now';
+    icon.style.display = 'flex';
+    arc.style.strokeDashoffset = CIRCUMFERENCE; // empty
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  } else {
+    btn.className = 'btn cooldown';
+    btn.disabled  = true;
+    label.textContent = `${remaining}s`;
+    icon.style.display = 'none';
+    // arc fills as time passes: 0 remaining → full circle
+    const progress = 1 - remaining / total;
+    arc.style.strokeDashoffset = CIRCUMFERENCE * (1 - progress);
+  }
+}
+
+async function forceRefresh() {
+  if (refreshCooldown > 0) return;
+  const res  = await fetch('/api/force_refresh');
+  const data = await res.json();
+  if (data.ok) {
+    const total = lastConfig?.force_refresh_cooldown ?? 60;
+    refreshCooldown = total;
+    startRefreshCountdown(total);
+  }
+}
+
+function startRefreshCountdown(total) {
+  updateRefreshBtn(refreshCooldown, total);
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    refreshCooldown--;
+    updateRefreshBtn(refreshCooldown, total);
+    if (refreshCooldown <= 0) clearInterval(refreshTimer);
+  }, 1000);
+}
+
+// Sync cooldown state from server on load
+function syncRefreshState(lastForceRefresh, total) {
+  if (!lastForceRefresh || lastForceRefresh === 0) return;
+  const elapsed = (Date.now() / 1000) - lastForceRefresh;
+  const remaining = Math.max(0, Math.ceil(total - elapsed));
+  if (remaining > 0 && refreshCooldown === 0) {
+    refreshCooldown = remaining;
+    startRefreshCountdown(total);
+  }
+}
+
+// ── SORT ────────────────────────────────────────────────────────
+function toggleSort() {
+  sortBySpread = !sortBySpread;
+  $('sort-btn').classList.toggle('active', sortBySpread);
+  $('sort-icon').textContent  = sortBySpread ? '↓' : '⇅';
+  $('sort-label').textContent = sortBySpread ? 'Sorted' : 'Sort by spread';
+  $('sort-info').style.display = sortBySpread ? 'block' : 'none';
+  if (lastConfig) renderTickers(window._lastSnapshots, lastConfig.threshold);
+}
+
+// ── WATCHLIST ─────────────────────────────────────────────────────
+function toggleWatchlist() {
+  watchlistOpen = !watchlistOpen;
+  $('watchlist-panel').classList.toggle('open', watchlistOpen);
+  $('watchlist-btn').classList.toggle('active', watchlistOpen);
+}
+
+async function hideTicker(ticker, event) {
+  event.stopPropagation();
+  hiddenTickers.add(ticker);
+  trash = [...new Set([ticker, ...trash])];
+  await syncWatchlistToServer();
+  const card = document.getElementById(`card-${ticker}`);
+  if (card) card.style.display = 'none';
+  renderTrash();
+}
+
+async function restoreTicker(ticker) {
+  hiddenTickers.delete(ticker);
+  trash = trash.filter(t => t !== ticker);
+  await syncWatchlistToServer();
+  const card = document.getElementById(`card-${ticker}`);
+  if (card) card.style.display = '';
+  renderTrash();
+}
+
+async function openTickerColumn(ticker, event) {
+  if (event) event.stopPropagation();
+  if (!openColumns.includes(ticker)) openColumns = [ticker, ...openColumns].slice(0, 4);
+  await syncOpenColumns();
+  renderOpenColumns();
+}
+
+async function closeTickerColumn(ticker, event) {
+  if (event) event.stopPropagation();
+  openColumns = openColumns.filter(t => t !== ticker);
+  await syncOpenColumns();
+  renderOpenColumns();
+}
+
+function renderTrash() {
+  const list = $('trash-list');
+  list.innerHTML = trash.length ? trash.map(t => `
+    <div class="trash-item"><span>${t}</span><button class="btn" onclick="restoreTicker('${t}')">Restore</button></div>`).join('') : '<div class="watchlist-empty">Trash is empty</div>';
+}
+
+function renderOpenColumns() {
+  const list = $('open-columns');
+  list.innerHTML = openColumns.length ? openColumns.map(t => `
+    <div class="open-column"><div class="note-row"><strong>${t}</strong><button class="btn" onclick="closeTickerColumn('${t}')">Close</button></div><div id="column-${t}" style="margin-top:8px;font-size:12px;color:var(--muted2)">Loading…</div></div>`).join('') : '<div class="watchlist-empty">No open columns</div>';
+  openColumns.forEach(t => loadColumnData(t));
+}
+
+async function loadColumnData(ticker) {
+  try {
+    const [histRes, newsRes] = await Promise.all([
+      fetch(`/api/history?ticker=${ticker}&days=30`),
+      fetch(`/api/news?ticker=${ticker}`)
+    ]);
+    const hist = await histRes.json();
+    const news = await newsRes.json();
+    const box = document.getElementById(`column-${ticker}`);
+    if (!box) return;
+    const trend = hist.ok && hist.candles.length ? hist.candles.at(-1).c : null;
+    const summary = hist.ok && hist.candles.length ? hist.candles.slice(-5).map(c => c.c.toFixed(2)).join(', ') : 'No history';
+    const items = (news.items || []).slice(0,3).map(n => `<div class="news-item"><a href="${n.url}" target="_blank" rel="noreferrer">${n.title}</a></div>`).join('');
+    box.innerHTML = `<div style="margin-bottom:8px">Trend: <span class="trend-pill ${hist.ok ? (trend < 0 ? 'trend-converging' : 'trend-widening') : 'trend-unknown'}">${hist.ok ? 'loaded' : 'no data'}</span></div><div style="font-size:11px;margin-bottom:8px">Last closes: ${summary}</div><div class="news-list">${items || '<div class="watchlist-empty">No news</div>'}</div>`;
+  } catch {}
+}
+
+function renderNotes() {
+  const list = $('notes-list');
+  list.innerHTML = notes.length ? notes.map(n => `
+    <div class="note-card">
+      <input class="note-input" value="${(n.title||'').replaceAll('"','&quot;')}" oninput="updateNote('${n.id}', 'title', this.value)" placeholder="Title">
+      <textarea class="note-text" oninput="updateNote('${n.id}', 'body', this.value)" placeholder="Write note…">${n.body||''}</textarea>
+      <div class="note-row"><button class="btn" onclick="deleteNote('${n.id}')">Delete</button></div>
+    </div>`).join('') : '<div class="watchlist-empty">No notes yet</div>';
+}
+
+async function addNote() {
+  const note = {id: String(Date.now()), title: '', body: ''};
+  notes = [note, ...notes];
+  renderNotes();
+  await syncNotes();
+}
+
+async function updateNote(id, key, value) {
+  notes = notes.map(n => n.id === id ? {...n, [key]: value} : n);
+  await syncNotes();
+}
+
+async function deleteNote(id) {
+  notes = notes.filter(n => n.id !== id);
+  renderNotes();
+  await syncNotes();
+}
+
+async function syncNotes() {
+  try {
+    await fetch('/api/notes?action=save', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(notes[0] || {})});
+  } catch {}
+}
+
+function renderWatchlistPanel() { renderTrash(); }
+
+async function syncWatchlistToServer() {
+  try {
+    await fetch('/api/watchlist', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({hidden: [...hiddenTickers], trash, open_columns: openColumns})
+    });
+  } catch {}
+}
+
+async function syncOpenColumns() {
+  try {
+    await fetch('/api/open_columns', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({open_columns: openColumns})
+    });
+  } catch {}
+}
+
+async function loadWatchlistFromServer() {
+  try {
+    const res = await fetch('/api/watchlist');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.hidden) {
+      hiddenTickers = new Set(data.hidden);
+      renderWatchlistPanel();
+      // Apply hidden state to existing cards
+      hiddenTickers.forEach(t => {
+        const card = document.getElementById(`card-${t}`);
+        if (card) card.style.display = 'none';
+      });
+    }
+  } catch {}
+}
+
+// ── AVG SPREAD ────────────────────────────────────────────────────
+function updateCardAvgRows(ticker, avgs) {
+  const card = document.getElementById(`card-${ticker}`);
+  if (!card) return;
+  const el7  = card.querySelector('.avg-7d');
+  const el30 = card.querySelector('.avg-30d');
+  if (!el7 || !el30) return;
+  const fmt = v => { const n=parseFloat(v); return (n>=0?'+':'')+v+'%'; };
+  const cls = v => parseFloat(v)>=0?'pos':'neg';
+  el7.innerHTML  = `<span class="avg-label">7d avg</span><span class="avg-value ${cls(avgs.avg7)}">${fmt(avgs.avg7)}</span>`;
+  el30.innerHTML = `<span class="avg-label">30d avg</span><span class="avg-value ${cls(avgs.avg30)}">${fmt(avgs.avg30)}</span>`;
+}
+
+function renderTrendBadge(trend) {
+  const cls = trend?.trend || 'unknown';
+  return `<span class="trend-pill trend-${cls}">${cls}</span>`;
+}
+
+function applySnapshotAvgs(s) {
+  if (s.avg7 == null || s.avg30 == null) return;
+  const card = document.getElementById(`card-${s.ticker}`);
+  if (!card) return;
+  updateCardAvgRows(s.ticker, { avg7: s.avg7.toFixed(3), avg30: s.avg30.toFixed(3) });
+}
+
+function queueHoverDraw(canvas, draw) {
+  let pending = false;
+  let lastArgs = null;
+  return (...args) => {
+    lastArgs = args;
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      draw(...lastArgs);
+    });
+  };
+}
+
+
+function assignTiers(list) {
+  const withSpread = list.filter(s => s.spread != null)
+    .slice().sort((a,b) => Math.abs(b.spread) - Math.abs(a.spread));
+  const tierMap = {};
+  const n = withSpread.length;
+  withSpread.forEach((s,i) => {
+    if      (i < 5)       tierMap[s.ticker] = 'tier-red';
+    else if (i >= n - 5)  tierMap[s.ticker] = 'tier-green';
+    else                  tierMap[s.ticker] = 'tier-yellow';
+  });
+  list.forEach(s => { if (s.spread == null) tierMap[s.ticker] = 'tier-none'; });
+  return tierMap;
+}
+
+const FILL_CLR  = {'tier-red':'#ff4444','tier-yellow':'#ffab40','tier-green':'#00e676','tier-none':'#2a2e38'};
+const RANK_LBL  = {'tier-red':'▲ HIGH','tier-yellow':'— MID','tier-green':'▼ LOW','tier-none':'N/A'};
+
+function fmt(n, dec=4) { return n==null ? '—' : Number(n).toFixed(dec); }
+
+// ── CONFIG BAR ───────────────────────────────────────────────────
+function renderConfig(config) {
+  if (lastConfig) return;
+  lastConfig = config;
+  $('config-bar').innerHTML = `
+    <div class="config-pill">Tickers: <span>${config.tickers.length}</span></div>
+    <div class="config-pill">Alert threshold: <span>±${config.threshold}%</span></div>
+    <div class="config-pill">Interval: <span>${config.interval}s</span></div>
+    <div class="config-pill">Refresh cooldown: <span>${config.force_refresh_cooldown}s</span></div>
+    <div class="config-pill">USD/USDT: <span>1:1</span></div>`;
+}
+
+// ── TICKERS ──────────────────────────────────────────────────────
+function renderTickers(snapshots, threshold) {
+  window._lastSnapshots = snapshots;
+  const grid = $('ticker-grid');
+  let list = Object.values(snapshots);
+  if (!list.length) return;
+
+  const tierMap = assignTiers(list);
+
+  if (sortBySpread) {
+    list = list.slice().sort((a,b) => {
+      const av = a.spread!=null ? Math.abs(a.spread) : -Infinity;
+      const bv = b.spread!=null ? Math.abs(b.spread) : -Infinity;
+      return bv - av;
+    });
+  }
+
+  // Create missing cards
+  list.forEach(s => {
+    if (!document.getElementById(`card-${s.ticker}`)) {
+      const c = document.createElement('div');
+      c.id = `card-${s.ticker}`;
+      grid.appendChild(c);
+    }
+  });
+
+  list.forEach(s => {
+    const card  = document.getElementById(`card-${s.ticker}`);
+    const tier  = tierMap[s.ticker] || 'tier-none';
+    const spread = s.spread;
+    const spreadDisplay = spread!=null
+      ? `${spread>0?'+':''}${Number(spread).toFixed(3)}%`
+      : 'N/A';
+    const fillW = spread!=null
+      ? Math.min(100, (Math.abs(spread)/(threshold*3))*100)
+      : 0;
+
+    const lev = leverageData[s.ticker];
+    const levBadge = lev ? `<span class="lev-badge">×${lev}</span>` : '';
+    const splitBadge = s.split_adj
+      ? `<span class="split-badge">÷${s.split_div} split</span>`
+      : '';
+    const sess = s.session || 'overnight';
+    const sessLabels = {premarket:'Pre-mkt', regular:'Regular', postmarket:'Post-mkt', overnight:'Overnight', 'post-fri':'Post-Fri'};
+    const sessBadge = `<span class="sess-badge ${sess}">${sessLabels[sess]||sess}</span>`;
+
+    card.className = `ticker-card ${tier}${s.status==='error'?' error':''}`;
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="ticker-name">${s.ticker}</span>
+        <div class="card-actions">
+          <button class="icon-btn card-open-btn" onclick="openTickerColumn('${s.ticker}',event)" title="Open">👁</button>
+          <button class="icon-btn card-hide-btn" onclick="hideTicker('${s.ticker}',event)" title="Trash">✕</button>
+        </div>
+        <div class="card-badges">
+          ${sessBadge}
+          ${splitBadge}
+          ${levBadge}
+          <span class="rank-badge ${tier}">${RANK_LBL[tier]}</span>
+        </div>
+      </div>
+      <div style="margin-top:6px">${renderTrendBadge(s.trend)}</div>
+      <div class="price-row">
+        <span class="price-label">MEXC</span>
+        <span class="price-value">$${fmt(s.price_mexc)}</span>
+      </div>
+      <div class="price-row">
+        <span class="price-label">Stock</span>
+        <span class="price-value">$${fmt(s.price_stock)}</span>
+      </div>
+      <div class="spread-row">
+        <span class="spread-label">Spread</span>
+        <span class="spread-value ${tier}">${spreadDisplay}</span>
+      </div>
+      <div class="spread-bar">
+        <div class="spread-fill" style="width:${fillW}%;background:${FILL_CLR[tier]};"></div>
+      </div>
+      <div class="avg-row avg-7d"></div>
+      <div class="avg-row avg-30d"></div>
+      <div class="time-stamp">${s.time||''}</div>`;
+
+    // Apply hidden state
+    if (hiddenTickers.has(s.ticker)) card.style.display = 'none';
+  });
+
+  // Re-order DOM
+  list.forEach(s => {
+    const card = document.getElementById(`card-${s.ticker}`);
+    if (card) grid.appendChild(card);
+  });
+}
+
+// ── ALERTS ───────────────────────────────────────────────────────
+function renderAlerts(alerts) {
+  $('alert-count').textContent = alerts.length;
+  const list = $('alerts-list');
+  if (!alerts.length) {
+    list.innerHTML = '<div class="no-alerts">No alerts yet — watching for spreads above threshold…</div>';
+    return;
+  }
+  const newIds = new Set(alerts.map(a => a.id));
+  const hasNew = [...newIds].some(id => !lastAlertIds.has(id));
+  lastAlertIds = newIds;
+  if (!hasNew && list.children.length === Math.min(alerts.length, 20)) return;
+
+  list.innerHTML = alerts.slice(0,20).map(a => {
+    const sc = a.spread>0?'positive':'negative';
+    const dc = a.direction.toLowerCase();
+    return `<div class="alert-row ${dc}">
+      <span class="alert-time">${a.time}</span>
+      <span class="alert-ticker">${a.ticker}</span>
+      <span class="alert-spread-val ${sc}">${a.spread>0?'+':''}${Number(a.spread).toFixed(3)}%</span>
+      <span class="alert-prices">MEXC $${fmt(a.price_mexc)} · Stock $${fmt(a.price_stock)}</span>
+      <span class="alert-dir ${dc}">${a.direction}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── POLL ─────────────────────────────────────────────────────────
+async function fetchState() {
+  try {
+    const res  = await fetch('/api/state');
+    const data = await res.json();
+
+    $('status-badge').textContent = data.status==='running' ? 'Live' : data.status;
+    $('status-badge').className   = data.status==='running' ? ''     : data.status;
+    $('last-update').textContent  = data.last_update ? `Updated ${data.last_update}` : 'Waiting…';
+
+    if (data.leverage) leverageData = data.leverage;
+    if (data.config)   {
+      renderConfig(data.config);
+      syncRefreshState(data.last_force_refresh, data.config.force_refresh_cooldown);
+    }
+    if (data.snapshots) window.renderTickers(data.snapshots, data.config.threshold);
+    if (data.snapshots) Object.values(data.snapshots).forEach(applySnapshotAvgs);
+    if (data.alerts)    renderAlerts(data.alerts);
+  } catch {
+    $('status-badge').textContent = 'Offline';
+    $('status-badge').className   = 'error';
+  }
+}
+
+function filterTickers(query) {
+  const q = query.trim().toUpperCase();
+  document.querySelectorAll('.ticker-card').forEach(card => {
+    const ticker = card.id.replace('card-', '');
+    card.style.display = (!q || ticker.includes(q)) ? '' : 'none';
+  });
+}
+
+
+// ── CANDLESTICK CHART ────────────────────────────────────────────
+let currentTicker = null;
+let currentDays   = 30;
+let chartCtx      = null;
+let hourlyMode    = false;  // true when viewing hourly candles
+
+function openModal(ticker) {
+  currentTicker = ticker;
+  currentDays   = 30;
+  hourlyMode    = false;
+  $('modal-ticker').textContent = ticker;
+  $('modal-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  ['30','60','90'].forEach(d => $('btn-'+d).classList.remove('active'));
+  $('btn-30').classList.add('active');
+  $('modal-mode-label').style.display = 'none';
+  // Restore period buttons visibility
+  ['btn-30','btn-60','btn-90'].forEach(id => { const b=$( id); b.style.display=''; });
+  loadHistory();
+}
+
+function openHourlyModal(ticker, spreadValue) {
+  currentTicker = ticker;
+  hourlyMode    = true;
+  $('modal-ticker').textContent = ticker + ' · 1h';
+  $('modal-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  ['30','60','90'].forEach(d => { $('btn-'+d).classList.remove('active'); $('btn-'+d).style.display = 'none'; });
+  $('modal-mode-label').style.display = 'inline';
+  loadHourlyHistory();
+}
+
+function closeModal() {
+  $('modal-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  if (chartCtx) { chartCtx = null; }
+  hourlyMode = false;
+  ['btn-30','btn-60','btn-90'].forEach(id => { $( id).style.display = ''; });
+  $('modal-mode-label').style.display = 'none';
+}
+
+function handleOverlayClick(e) {
+  if (e.target === $('modal-overlay')) closeModal();
+}
+
+function setDays(d) {
+  currentDays = d;
+  ['30','60','90'].forEach(x => $('btn-'+x).classList.remove('active'));
+  $('btn-'+d).classList.add('active');
+  loadHistory();
+}
+
+async function loadHistory() {
+  const canvas  = $('chart');
+  const loading = $('modal-loading');
+  canvas.style.display  = 'none';
+  loading.style.display = 'flex';
+  loading.textContent   = 'Loading…';
+  $('modal-stats').innerHTML = '';
+
+  try {
+    const res  = await fetch(`/api/history?ticker=${currentTicker}&days=${currentDays}`);
+    const data = await res.json();
+    if (!data.ok || !data.candles.length) {
+      loading.textContent = data.error || 'No data available';
+      return;
+    }
+    loading.style.display = 'none';
+    canvas.style.display  = 'block';
+    drawCandles(canvas, data.candles, data.ticker);
+    drawStats(data.candles);
+  } catch(e) {
+    loading.textContent = 'Error: ' + e.message;
+  }
+}
+
+async function loadHourlyHistory() {
+  const canvas  = $('chart');
+  const loading = $('modal-loading');
+  canvas.style.display  = 'none';
+  loading.style.display = 'flex';
+  loading.textContent   = 'Loading hourly candles…';
+  $('modal-stats').innerHTML = '';
+
+  try {
+    const res  = await fetch(`/api/history_hourly?ticker=${currentTicker}`);
+    const data = await res.json();
+    if (!data.ok || !data.candles.length) {
+      loading.textContent = data.error || 'No hourly data available';
+      return;
+    }
+    loading.style.display = 'none';
+    canvas.style.display  = 'block';
+    drawCandles(canvas, data.candles, data.ticker, true);
+    drawStats(data.candles);
+  } catch(e) {
+    loading.textContent = 'Error: ' + e.message;
+  }
+}
+
+function toggleMA20() {
+  showMA20 = !showMA20;
+  $('btn-ma20').classList.toggle('active', showMA20);
+  // Reload current chart
+  if (hourlyMode) loadHourlyHistory();
+  else loadHistory();
+}
+
+function drawStats(candles) {
+  const closes = candles.map(c => c.c);
+  const max    = Math.max(...candles.map(c => c.h));
+  const min    = Math.min(...candles.map(c => c.l));
+  const avg    = closes.reduce((a,b)=>a+b,0)/closes.length;
+  const zeros  = closes.filter(c => Math.abs(c) < 0.1).length;
+  const last   = closes[closes.length-1];
+
+  const fmt = v => (v>=0?'+':'')+v.toFixed(3)+'%';
+  const cls  = v => v>=0?'pos':'neg';
+
+  $('modal-stats').innerHTML = `
+    <div class="stat-item">Current <span class="${cls(last)}">${fmt(last)}</span></div>
+    <div class="stat-item">Avg <span class="${cls(avg)}">${fmt(avg)}</span></div>
+    <div class="stat-item">Max <span class="pos">${fmt(max)}</span></div>
+    <div class="stat-item">Min <span class="neg">${fmt(min)}</span></div>
+    <div class="stat-item">Near zero (&lt;0.1%) <span>${zeros} days</span></div>
+    <div class="stat-item">Candles <span>${candles.length}</span></div>
+  `;
+}
+
+function drawCandles(canvas, candles, ticker, isHourly = false) {
+  // Resize canvas to actual pixel size
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width  = rect.width  * devicePixelRatio;
+  canvas.height = (rect.height || 380) * devicePixelRatio;
+  canvas.style.width  = rect.width + 'px';
+  canvas.style.height = (rect.height || 380) + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  chartCtx = ctx;
+
+  const W = rect.width;
+  const H = rect.height || 380;
+  const PAD = { top: 24, right: 20, bottom: 44, left: 58 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top  - PAD.bottom;
+
+  // Value range
+  const allH = candles.map(c=>c.h), allL = candles.map(c=>c.l);
+  let vMax = Math.max(...allH);
+  let vMin = Math.min(...allL);
+  const pad = (vMax - vMin) * 0.12 || 0.5;
+  vMax += pad; vMin -= pad;
+  const vRange = vMax - vMin;
+
+  const toY = v => PAD.top + chartH * (1 - (v - vMin) / vRange);
+  const toX = i => PAD.left + (i + 0.5) * (chartW / candles.length);
+  const candleW = Math.max(2, chartW / candles.length * 0.6);
+
+  // Background
+  ctx.fillStyle = '#0a0c0f';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines
+  const gridLevels = 6;
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth   = 1;
+  for (let i = 0; i <= gridLevels; i++) {
+    const v = vMin + (vRange / gridLevels) * i;
+    const y = toY(v);
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+    ctx.fillStyle = '#5a6270';
+    ctx.font = '10px IBM Plex Mono, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText((v>=0?'+':'')+v.toFixed(2)+'%', PAD.left - 6, y + 3.5);
+  }
+
+  // Zero line
+  if (vMin < 0 && vMax > 0) {
+    const y0 = toY(0);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(PAD.left, y0); ctx.lineTo(W - PAD.right, y0); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '10px IBM Plex Mono, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('0%', PAD.left - 6, y0 + 3.5);
+  }
+
+  // X-axis labels (show ~8 evenly spaced dates)
+  const step = Math.max(1, Math.floor(candles.length / 8));
+  ctx.fillStyle = '#5a6270';
+  ctx.font = '9px IBM Plex Mono, monospace';
+  ctx.textAlign = 'center';
+  candles.forEach((c, i) => {
+    if (i % step === 0 || i === candles.length - 1) {
+      // date field: "YYYY-MM-DD" for daily, "YYYY-MM-DD HH:MM" for hourly
+      const label = isHourly
+        ? (c.date.length > 10 ? c.date.slice(5,16) : c.date.slice(5))
+        : c.date.slice(5); // MM-DD
+      ctx.fillText(label, toX(i), H - PAD.bottom + 14);
+    }
+  });
+
+  // Candles
+  candles.forEach((c, i) => {
+    const x  = toX(i);
+    const yO = toY(c.o);
+    const yC = toY(c.c);
+    const yH = toY(c.h);
+    const yL = toY(c.l);
+    const bull = c.c >= c.o;
+    const color = bull ? '#00e676' : '#ff4444';
+
+    // Wick
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, yH); ctx.lineTo(x, yL);
+    ctx.stroke();
+
+    // Body
+    const bodyTop = Math.min(yO, yC);
+    const bodyH   = Math.max(1.5, Math.abs(yO - yC));
+    ctx.fillStyle = color;
+    ctx.fillRect(x - candleW/2, bodyTop, candleW, bodyH);
+  });
+
+  // MA20 line (purple)
+  if (showMA20 && candles.length >= 2) {
+    const period = Math.min(20, candles.length);
+    ctx.strokeStyle = '#a78bfa';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < candles.length; i++) {
+      if (i < period - 1) continue;
+      const slice = candles.slice(i - period + 1, i + 1);
+      const ma = slice.reduce((s, c) => s + c.c, 0) / period;
+      const x = toX(i);
+      const y = toY(ma);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    // MA20 label
+    if (started) {
+      const lastMa = (() => {
+        const slice = candles.slice(-period);
+        return slice.reduce((s,c)=>s+c.c,0)/period;
+      })();
+      ctx.fillStyle = '#a78bfa';
+      ctx.font = '9px IBM Plex Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('MA20 '+(lastMa>=0?'+':'')+lastMa.toFixed(2)+'%', PAD.left+4, PAD.top+13);
+    }
+  }
+
+  // Tooltip on hover
+  const redraw = () => drawCandlesInner(ctx, W, H, PAD, candles, toX, toY, candleW, vMin, vRange, vMax, isHourly);
+  const queuedRedraw = queueHoverDraw(canvas, redraw);
+  canvas.onmousemove = (e) => {
+    const rect2 = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect2.left;
+    const i  = Math.floor((mx - PAD.left) / (chartW / candles.length));
+    if (i < 0 || i >= candles.length) { redraw(); return; }
+    const c = candles[i];
+    queuedRedraw();
+    drawTooltip(ctx, toX(i), c, W, PAD);
+  };
+  canvas.onmouseleave = () => {
+    redraw();
+  };
+}
+
+function drawCandlesInner(ctx, W, H, PAD, candles, toX, toY, candleW, vMin, vRange, vMax, isHourly = false) {
+  const chartH = H - PAD.top - PAD.bottom;
+
+  ctx.fillStyle = '#0a0c0f';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  for (let i = 0; i <= 6; i++) {
+    const v = vMin + (vRange / 6) * i;
+    const y = toY(v);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+    ctx.fillStyle = '#5a6270'; ctx.font = '10px IBM Plex Mono, monospace'; ctx.textAlign = 'right';
+    ctx.fillText((v>=0?'+':'')+v.toFixed(2)+'%', PAD.left - 6, y + 3.5);
+  }
+
+  // X labels
+  const step = Math.max(1, Math.floor(candles.length / 8));
+  ctx.fillStyle = '#5a6270'; ctx.font = '9px IBM Plex Mono, monospace'; ctx.textAlign = 'center';
+  candles.forEach((c,i) => {
+    if (i % step === 0 || i === candles.length - 1) {
+      const label = isHourly
+        ? (c.date.length > 10 ? c.date.slice(5,16) : c.date.slice(5))
+        : c.date.slice(5);
+      ctx.fillText(label, toX(i), H - PAD.bottom + 14);
+    }
+  });
+
+  // Zero line
+  const vMax2 = vMin + vRange;
+  if (vMin < 0 && vMax2 > 0) {
+    const y0 = toY(0);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(PAD.left, y0); ctx.lineTo(W - PAD.right, y0); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Candles
+  candles.forEach((c,i) => {
+    const x=toX(i), yO=toY(c.o), yC=toY(c.c), yH=toY(c.h), yL=toY(c.l);
+    const color = c.c >= c.o ? '#00e676' : '#ff4444';
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x,yH); ctx.lineTo(x,yL); ctx.stroke();
+    const bodyTop = Math.min(yO,yC);
+    ctx.fillStyle = color;
+    ctx.fillRect(x - candleW/2, bodyTop, candleW, Math.max(1.5, Math.abs(yO-yC)));
+  });
+
+  // MA20
+  if (showMA20 && candles.length >= 2) {
+    const period = Math.min(20, candles.length);
+    ctx.strokeStyle = '#a78bfa'; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < candles.length; i++) {
+      if (i < period - 1) continue;
+      const slice = candles.slice(i - period + 1, i + 1);
+      const ma = slice.reduce((s,c)=>s+c.c,0)/period;
+      const x = toX(i), y = toY(ma);
+      if (!started) { ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+}
+
+function drawTooltip(ctx, x, c, W, PAD) {
+  const lines = [
+    c.date,
+    `O: ${(c.o>=0?'+':'')+c.o.toFixed(3)}%`,
+    `H: ${(c.h>=0?'+':'')+c.h.toFixed(3)}%`,
+    `L: ${(c.l>=0?'+':'')+c.l.toFixed(3)}%`,
+    `C: ${(c.c>=0?'+':'')+c.c.toFixed(3)}%`,
+  ];
+  const TW = 112, TH = lines.length * 17 + 12;
+  let tx = x + 12;
+  if (tx + TW > W - PAD.right) tx = x - TW - 12;
+  const ty = PAD.top + 10;
+
+  ctx.fillStyle = 'rgba(17,20,26,0.95)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+  roundRect(ctx, tx, ty, TW, TH, 6);
+  ctx.fill(); ctx.stroke();
+
+  ctx.font = '10px IBM Plex Mono, monospace'; ctx.textAlign = 'left';
+  lines.forEach((ln, i) => {
+    ctx.fillStyle = i === 0 ? '#e8ecf0' : (ln.startsWith('H') ? '#00e676' : ln.startsWith('L') ? '#ff4444' : '#8a93a0');
+    ctx.fillText(ln, tx + 8, ty + 16 + i * 17);
+  });
+
+  // Crosshair vertical
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(x, PAD.top); ctx.lineTo(x, 380 - PAD.bottom); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
+  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+  ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
+  ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
+  ctx.closePath();
+}
+
+// ── Wire up card clicks ───────────────────────────────────────────
+// Called after cards are rendered
+function attachCardClicks() {
+  document.querySelectorAll('.ticker-card').forEach(card => {
+    if (card.dataset.clickBound) return;
+    card.dataset.clickBound = '1';
+    card.addEventListener('click', () => {
+      const ticker = card.id.replace('card-', '');
+      openModal(ticker);
+    });
+  });
+}
+
+// Patch renderTickers to attach clicks after render
+const _origRenderTickers = renderTickers;
+window.renderTickers = function(snapshots, threshold) {
+  _origRenderTickers(snapshots, threshold);
+  attachCardClicks();
+};
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+fetchState();
+setInterval(fetchState, 2000);
+</script>
+
+<!-- WATCHLIST PANEL -->
+<div class="watchlist-panel" id="watchlist-panel">
+  <div class="watchlist-panel-header">
+    <span class="watchlist-panel-title">👁 Watchlist</span>
+    <button class="watchlist-panel-close" onclick="toggleWatchlist()">✕</button>
+  </div>
+  <div class="watchlist-section">
+    <div class="watchlist-section-label">Hidden tickers</div>
+    <div class="watchlist-hidden-list" id="watchlist-hidden-list">
+      <div class="watchlist-empty" id="watchlist-empty">No hidden tickers</div>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORY MODAL -->
+<div class="modal-overlay" id="modal-overlay" onclick="handleOverlayClick(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title">Spread History — <span id="modal-ticker">—</span></div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-toolbar">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);margin-right:4px">Period:</span>
+      <button class="btn active" id="btn-30" onclick="setDays(30)">30 days</button>
+      <button class="btn"        id="btn-60" onclick="setDays(60)">60 days</button>
+      <button class="btn"        id="btn-90" onclick="setDays(90)">90 days</button>
+      <div style="flex:1"></div>
+      <span id="modal-mode-label" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);margin-right:6px;display:none">1h candles</span>
+      <button class="btn active" id="btn-ma20" onclick="toggleMA20()" title="Toggle MA20">MA20</button>
+    </div>
+    <div class="modal-stats" id="modal-stats"></div>
+    <div class="modal-body">
+      <div class="modal-loading" id="modal-loading">Loading…</div>
+      <canvas id="chart" style="display:none"></canvas>
+    </div>
+  </div>
+</div>
+</body>
+</html>

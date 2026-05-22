@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+dashboard_state.json
+venv/
+.venv/
