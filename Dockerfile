@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 8765
 
-CMD gunicorn app:app --bind 0.0.0.0:${PORT:-8765} --workers 1 --threads 4 --timeout 300 --preload
+CMD ["sh", "-c", "gunicorn app:app --bind 0.0.0.0:${PORT:-8765} --workers 1 --threads 4 --timeout 300"]
