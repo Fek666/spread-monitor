@@ -242,6 +242,11 @@ def login_required(f):
     return decorated
 
 
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
     if request.method == "POST":
@@ -426,6 +431,8 @@ _monitor_started = False
 
 
 def run_monitor():
+    import time as _t
+    _t.sleep(3)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(engine.monitor_loop())
@@ -438,7 +445,7 @@ def ensure_monitor():
     _monitor_started = True
     monitor_thread = threading.Thread(target=run_monitor, daemon=True)
     monitor_thread.start()
-    log.info("Monitor thread started")
+    log.info("Monitor thread scheduled (starts in 3s)")
 
 
 # Start monitor when app is imported (gunicorn --preload)
