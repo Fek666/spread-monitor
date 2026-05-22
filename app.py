@@ -244,6 +244,7 @@ def login_required(f):
 
 @app.route("/health")
 def health():
+    ensure_monitor()
     return jsonify({"status": "ok"}), 200
 
 
@@ -432,7 +433,7 @@ _monitor_started = False
 
 def run_monitor():
     import time as _t
-    _t.sleep(3)
+    _t.sleep(10)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(engine.monitor_loop())
@@ -445,11 +446,7 @@ def ensure_monitor():
     _monitor_started = True
     monitor_thread = threading.Thread(target=run_monitor, daemon=True)
     monitor_thread.start()
-    log.info("Monitor thread scheduled (starts in 3s)")
-
-
-# Start monitor when app is imported (gunicorn --preload)
-ensure_monitor()
+    log.info("Monitor thread scheduled (starts in 10s)")
 
 
 # ─────────────────────────────────────────────
