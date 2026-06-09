@@ -38,11 +38,15 @@ CONFIG = {
     "tickers": [t.strip() for t in os.getenv(
         "TICKERS",
         "MU,CSCO,NVDA,TSLA,INTC,NBIS,SNDK,CRCL,MRVL,GOOGL,MSTR,AMD,DRAM,AAPL,BABA,"
-        "HIMS,PLTR,META,MSFT,RKLB,QQQ,STX,ASTS,IREN,COIN,WDC,GE,PANW,INTU,ARM,CVNA,"
+        "HIMS,PLTR,META,MSFT,RKLB,QQQ,STX,ASTS,IREN,COIN,WDC,GE,PANW,INTU,ARM,"
         "COHR,AMZN,SPOT,SHOP,CRWV,TXN,TSM,QCOM,UBER,CRWD,VRT,ASML,IONQ,LITE,IBM,ABBV,"
-        "LLY,ORCL,JPM,NKE,FIG,AMAT,ONDS,ADBE,VZ,SOXX,NOW,HOOD,SNOW,USAR,MA,JD,CRM,"
-        "XOM,C,WFC,GME,BA,PYPL,SBUX,PG,LRCX,SMCI,AVGO,NFLX,V,LMT,OXY,KO,PAYP,WMT,"
-        "CVX,RDDT,BAC,GEV,COST,RTX,UNH,PDD,COP,MCD,FUTU,KLAC,CBRS,FLNC"
+        "LLY,ORCL,JPM,NKE,FIG,AMAT,ONDS,ADBE,VZ,SOXX,HOOD,SNOW,USAR,MA,JD,CRM,"
+        "XOM,C,WFC,GME,BA,PYPL,SBUX,PG,LRCX,SMCI,AVGO,V,LMT,OXY,KO,PAYP,WMT,"
+        "CVX,RDDT,BAC,GEV,COST,RTX,UNH,PDD,COP,MCD,FUTU,KLAC,CBRS,FLNC,"
+        "AAOI,HPE,QNT,BB,EWY,HD,DIS,GLW,BE,XLE,NVO,STX,"
+        "RDW,NOK,EWT,LUNR,APP,BRK-B,APLD,SHLD,INFQ,EWJ"
+      
+ 
     ).split(",")],
     "spread_threshold":      float(os.getenv("SPREAD_THRESHOLD", "0.7")),
     "check_interval":        int(os.getenv("CHECK_INTERVAL", "8")),
@@ -94,11 +98,48 @@ PERSIST_PATH = Path(__file__).parent / "dashboard_state.json"
 # CUSTOM SYMBOL MAPPING
 # ─────────────────────────────────────────────
 SYMBOL_MAP: dict[str, list[str]] = {
-    "NVDA": ["NVIDIA_USDT",    "NVDASTOCK_USDT"],
-    "TSLA": ["TESLA_USDT",     "TSLASTOCK_USDT"],
-    "COIN": ["COINBASE_USDT",  "COINSTOCK_USDT"],
-    "HOOD": ["ROBINHOOD_USDT", "HOODSTOCK_USDT"],
-}
+    "SPCX":      ["SPCX_USDT",           "SPCXSTOCK_USDT"],
+    "AAOI":      ["AAOI_USDT",           "AAOISTOCK_USDT"],
+    "NAS100":    ["NAS100_USDT",         "NAS100STOCK_USDT"],
+    "HPE":       ["HPE_USDT",            "HPESTOCK_USDT"],
+    "ANTHROPIC": ["ANTHROPIC_USDT",      "ANTHROPICSTOCK_USDT"],
+    "OPENAI":    ["OPENAI_USDT",         "OPENAISTOCK_USDT"],
+    "JP225":     ["JP225_USDT",          "JP225STOCK_USDT"],
+    "QNT":       ["QNTSTOCK_USDT",           "QNTSTOCK_USDT"],
+    "000660.KS":   ["SKHYNIX_USDT",       "SKHYNIXSTOCK_USDT"],
+    "BBSTOCK":   ["BB_USDT",            "BBSTOCK_USDT"],
+    "RDW":       ["RDW_USDT",           "RDWSTOCK_USDT"],
+    "NOK":       ["NOK_USDT",           "NOKSTOCK_USDT"],
+    "EWT":       ["EWT_USDT",           "EWTSTOCK_USDT"],
+    "005930.KS":   ["SAMSUNG_USDT",       "SAMSUNGSTOCK_USDT"],
+    "LUNR":      ["LUNR_USDT",          "LUNRSTOCK_USDT"],
+    "APP":       ["APP_USDT",           "APPSTOCK_USDT"],
+    "BRK-B":     ["BRKB_USDT",          "BRKBSTOCK_USDT"],
+    "APLD":      ["APLD_USDT",          "APLDSTOCK_USDT"],
+    "SHLD":      ["SHLD_USDT",          "SHLDSTOCK_USDT"],
+    "INFQ":      ["INFQ_USDT",          "INFQSTOCK_USDT"],
+    "HK50":      ["HK50_USDT",          "HK50STOCK_USDT"],
+    "EWJ":       ["EWJ_USDT",           "EWJSTOCK_USDT"],
+    "EWY":       ["EWY_USDT",           "EWYSTOCK_USDT"],
+    "HD":        ["HD_USDT",            "HDSTOCK_USDT"],
+    "DIS":       ["DIS_USDT",           "DISSTOCK_USDT"],
+    "GLW":       ["GLW_USDT",           "GLWSTOCK_USDT"],
+    "BE":        ["BE_USDT",            "BESTOCK_USDT"],
+    "XLE":       ["XLE_USDT",           "XLESTOCK_USDT"],
+    "NVO":       ["NVO_USDT",           "NVOSTOCK_USDT"],
+    "005380.KS":   ["HYUNDAI_USDT",       "HYUNDAISTOCK_USDT"],
+    "US30":      ["US30_USDT",          "US30STOCK_USDT"],
+    "STX":       ["STXSTOCK_USDT",           "STXSTOCK_USDT"],
+    "RTXSTOCK":  ["RTX_USDT",           "RTXSTOCK_USDT"],
+    "NVDA":      ["NVIDIA_USDT",           "NVDASTOCK_USDT"],
+    "TSLA":      ["TESLA_USDT",           "TSLASTOCK_USDT"],
+    "COIN":      ["COINBASE_USDT",           "NVDASTOCK_USDT"],
+    "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
+    "HOOD":      ["ROBINHOOD_USDT",           "QQQ_USDT"],
+    "BB":        ["BBSTOCK_USDT",           "BB_USDT"],
+    "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
+
+} 
 
 # ─────────────────────────────────────────────
 # SPLIT ADJUSTMENTS  (applied to MEXC price)
