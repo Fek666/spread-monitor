@@ -94,6 +94,12 @@ _watchlist_hidden:       set              = set()
 _state_lock = threading.Lock()
 PERSIST_PATH = Path(__file__).parent / "dashboard_state.json"
 
+# Telegram
+TG_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TG_CHAT_ID  = os.getenv("TELEGRAM_CHAT_ID", "")
+# Порог изменения спреда для уведомления (в %)
+SPREAD_JUMP_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
+
 # ─────────────────────────────────────────────
 # CUSTOM SYMBOL MAPPING
 # ─────────────────────────────────────────────
@@ -421,6 +427,100 @@ def send_alert(ticker: str, spread: float, price_mexc: float,
 
 
 # ══════════════════════════════════════════════════════════════════
+# TELEGRAM
+# ══════════════════════════════════════════════════════════════════
+
+async def tg_send(text: str, chat_id: str = "") -> None:
+    """Отправить сообщение в Telegram."""
+    token = TG_TOKEN
+    cid   = chat_id or TG_CHAT_ID
+    if not token or not cid:
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": cid, "text": text, "parse_mode": "HTML"}
+    try:
+        async with aiohttp.ClientSession() as s:
+            await s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8))
+    except Exception as e:
+        log.warning("Telegram send error: %s", e)
+
+
+async def tg_send_top10(chat_id: str = "") -> None:
+    """Топ-10 тикеров по абсолютному значению спреда."""
+    candidates = [
+        (t, s["spread"], s.get("price_mexc", 0), s.get("price_stock", 0))
+        for t, s in state["snapshots"].items()
+        if s.get("spread") is not None and s.get("status") != "error"
+    ]
+    if not candidates:
+        await tg_send("Нет данных.", chat_id)
+        return
+
+    candidates.sort(key=lambda x: abs(x[1]), reverse=True)
+    top = candidates[:10]
+
+    lines = ["📊 <b>Топ-10 спредов MEXC vs Stock</b>\n"]
+    for i, (ticker, spread, p_mexc, p_stock) in enumerate(top, 1):
+        arrow = "📈" if spread > 0 else "📉"
+        lines.append(
+            f"{i}. {arrow} <b>{ticker}</b>  {spread:+.3f}%\n"
+            f"   MEXC <code>${p_mexc:.4f}</code> · Yahoo <code>${p_stock:.4f}</code>"
+        )
+    await tg_send("\n".join(lines), chat_id)
+
+
+async def tg_send_jump_alert(ticker: str, spread: float, prev: float,
+                              price_mexc: float, price_stock: float) -> None:
+    """Уведомление о скачке спреда на SPREAD_JUMP_THRESHOLD%+."""
+    delta = spread - prev
+    arrow = "📈" if delta > 0 else "📉"
+    direction = "PREMIUM" if spread > 0 else "DISCOUNT"
+    text = (
+        f"⚡ <b>Спред скакнул: {ticker}</b>\n"
+        f"{arrow} {direction}\n"
+        f"Было: <code>{prev:+.3f}%</code> → Стало: <code>{spread:+.3f}%</code>\n"
+        f"Изменение: <b>{delta:+.3f}%</b>\n"
+        f"MEXC <code>${price_mexc:.4f}</code> · Yahoo <code>${price_stock:.4f}</code>"
+    )
+    await tg_send(text)
+
+
+# Cooldown для jump-алертов: не чаще раза в 5 минут на тикер
+_jump_alert_ts: dict[str, float] = {}
+JUMP_COOLDOWN = int(os.getenv("JUMP_COOLDOWN", "300"))
+
+
+async def tg_bot_polling() -> None:
+    """Long-polling бот. Команда /chart → топ-10 спредов."""
+    if not TG_TOKEN:
+        return
+    offset = 0
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates"
+    log.info("Telegram bot polling started")
+    while True:
+        try:
+            async with aiohttp.ClientSession() as s:
+                resp = await s.get(
+                    url,
+                    params={"offset": offset, "timeout": 30, "allowed_updates": '["message"]'},
+                    timeout=aiohttp.ClientTimeout(total=35),
+                )
+                data = await resp.json()
+            for update in data.get("result", []):
+                offset = update["update_id"] + 1
+                msg     = update.get("message", {})
+                text    = msg.get("text", "").strip().lower()
+                chat_id = str(msg.get("chat", {}).get("id", ""))
+                if text in ("/chart", "/chart@" + TG_TOKEN.split(":")[0]):
+                    asyncio.create_task(tg_send_top10(chat_id))
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            log.warning("Telegram polling error: %s", e)
+            await asyncio.sleep(5)
+
+
+# ══════════════════════════════════════════════════════════════════
 # SPREAD HISTORY  (for rolling average)
 # ══════════════════════════════════════════════════════════════════
 
@@ -452,6 +552,7 @@ async def monitor_loop() -> None:
     connector = aiohttp.TCPConnector(limit_per_host=1)
     async with aiohttp.ClientSession(connector=connector) as session:
         asyncio.create_task(fetch_all_leverage(session))
+        asyncio.create_task(tg_bot_polling())
         while True:
             _force_refresh_event.clear()
             await run_full_cycle(session)
@@ -577,6 +678,17 @@ def _update_snapshot(ticker: str, price_mexc: Optional[float],
                 and abs(prev) >= CONFIG["spread_threshold"]
                 and abs(spread) <= CONFIG["convergence_threshold"]):
             send_alert(ticker, spread, price_mexc, price_stock, "convergence")
+
+        # Telegram jump alert: спред вырос на SPREAD_JUMP_THRESHOLD%+
+        if prev is not None:
+            delta = abs(spread - prev)
+            if delta >= SPREAD_JUMP_THRESHOLD:
+                now = time.time()
+                if now - _jump_alert_ts.get(ticker, 0) >= JUMP_COOLDOWN:
+                    _jump_alert_ts[ticker] = now
+                    asyncio.create_task(
+                        tg_send_jump_alert(ticker, spread, prev, price_mexc, price_stock)
+                    )
 
         _prev_spread[ticker] = spread
 
@@ -997,10 +1109,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        self.do_GET()
+
 
 def start_http_server() -> None:
     from http.server import ThreadingHTTPServer
-    server = ThreadingHTTPServer(("127.0.0.1", CONFIG["web_port"]), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0", CONFIG["web_port"]), Handler)
     log.info("Dashboard → http://localhost:%s", CONFIG["web_port"])
     server.serve_forever()
 
