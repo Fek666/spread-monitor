@@ -113,7 +113,7 @@ SYMBOL_MAP: dict[str, list[str]] = {
     "JP225":     ["JP225_USDT",          "JP225STOCK_USDT"],
     "QNT":       ["QNTSTOCK_USDT",           "QNTSTOCK_USDT"],
     "000660.KS":   ["SKHYNIX_USDT",       "SKHYNIXSTOCK_USDT"],
-    "BBSTOCK":   ["BB_USDT",            "BBSTOCK_USDT"],
+    "BBSTOCK":   ["BBSTOCK_USDT"],
     "RDW":       ["RDW_USDT",           "RDWSTOCK_USDT"],
     "NOK":       ["NOK_USDT",           "NOKSTOCK_USDT"],
     "EWT":       ["EWT_USDT",           "EWTSTOCK_USDT"],
@@ -137,13 +137,15 @@ SYMBOL_MAP: dict[str, list[str]] = {
     "US30":      ["US30_USDT",          "US30STOCK_USDT"],
     "STX":       ["STXSTOCK_USDT",           "STXSTOCK_USDT"],
     "NVDA":      ["NVIDIA_USDT",           "NVDASTOCK_USDT"],
-    "TSLA":      ["TESLA_USDT",           "TSLASTOCK_USDT"],
+    "TSLA":      ["TESLA_USDT",],
     "COIN":      ["COINBASE_USDT",           "COINSTOCK_USDT"],
     "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
     "HOOD":      ["ROBINHOOD_USDT",           "HOODSTOCK_USDT"],
     "BB":        ["BBSTOCK_USDT",             "BB_USDT"],
-    "CVX":       ["CVXSTOCK_USDT",            "CVXSTOCK_USDT"],
-    "C":         ["CSTOCK_USDT",              "C_USDT"],
+    "CVX":       ["CVXSTOCK_USDT",            "CVX_USDT"],
+    "C":         ["CSTOCK_USDT",],
+    "AAPL":         ["AAPLSTOCK_USDT",],
+    "BABA":         ["BABASTOCK_USDT",],
     "AXTI":      ["AXTISTOCK_USDT",           "AXTI_USDT"],
 } 
 
@@ -468,68 +470,132 @@ def send_alert(ticker: str, spread: float, price_mexc: float,
 # TELEGRAM
 # ══════════════════════════════════════════════════════════════════
 
-async def tg_send(text: str, chat_id: str = "") -> None:
-    """Отправить сообщение в Telegram."""
+async def tg_send(text: str, chat_id: str = "") -> int:
+    """Отправить сообщение. Возвращает message_id."""
     token = TG_TOKEN
     cid   = chat_id or TG_CHAT_ID
     if not token or not cid:
-        return
+        return 0
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": cid, "text": text, "parse_mode": "HTML"}
     try:
         async with aiohttp.ClientSession() as s:
-            await s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8))
+            resp = await s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8))
+            data = await resp.json()
+            return data.get("result", {}).get("message_id", 0)
     except Exception as e:
         log.warning("Telegram send error: %s", e)
+    return 0
+
+
+async def tg_edit(message_id: int, text: str, chat_id: str = "") -> None:
+    """Редактировать существующее сообщение."""
+    token = TG_TOKEN
+    cid   = chat_id or TG_CHAT_ID
+    if not token or not cid or not message_id:
+        return
+    url = f"https://api.telegram.org/bot{token}/editMessageText"
+    payload = {"chat_id": cid, "message_id": message_id, "text": text, "parse_mode": "HTML"}
+    try:
+        async with aiohttp.ClientSession() as s:
+            await s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8))
+    except Exception as e:
+        log.warning("Telegram edit error: %s", e)
+
+
+def _format_alert_text(ticker: str, spread: float, avg30,
+                        price_mexc: float, price_stock: float,
+                        closed: bool = False) -> str:
+    circle  = "🔴" if spread > 0 else "🟢"
+    action  = "ШОРТ на MEXC" if spread > 0 else "ЛОНГ на MEXC"
+    avg_str = f"{avg30:+.3f}%" if avg30 is not None else "N/A"
+    deviation = (spread - avg30) if avg30 is not None else spread
+    dev_str = f"{deviation:+.3f}%" if avg30 is not None else "N/A"
+
+    if closed:
+        return (
+            f"✅ <b>{ticker}</b> — спред вернулся в норму\n"
+            f"Текущий: <code>{spread:+.3f}%</code>  "
+            f"avg30: <code>{avg_str}</code>"
+        )
+    return (
+        f"{circle} <b>{ticker}</b>  —  {action}\n"
+        f"├ Спред:  <code>{spread:+.3f}%</code>\n"
+        f"├ MEXC:   <code>${price_mexc:.4f}</code>\n"
+        f"├ Yahoo:  <code>${price_stock:.4f}</code>\n"
+        f"├ avg30:  <code>{avg_str}</code>\n"
+        f"└ Откл:   <code>{dev_str}</code>"
+    )
+
+# ticker → {msg_id, last_sent_spread}
+_tg_alert_state: dict = {}
+ALERT_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
+ALERT_STEP      = float(os.getenv("ALERT_STEP", "0.5"))
+
+
+async def tg_check_spread_alert(ticker: str, spread: float, avg30,
+                                  price_mexc: float, price_stock: float) -> None:
+    if avg30 is None:
+        return
+    deviation  = abs(spread - avg30)
+    alert_st   = _tg_alert_state.get(ticker)
+
+    if deviation >= ALERT_THRESHOLD:
+        if alert_st is None:
+            text   = _format_alert_text(ticker, spread, avg30, price_mexc, price_stock)
+            msg_id = await tg_send(text)
+            _tg_alert_state[ticker] = {"msg_id": msg_id, "last_sent_spread": spread}
+            log.info("TG alert: %s spread=%+.3f avg30=%+.3f", ticker, spread, avg30)
+        else:
+            last = alert_st["last_sent_spread"]
+            if abs(spread - last) >= ALERT_STEP:
+                text   = _format_alert_text(ticker, spread, avg30, price_mexc, price_stock)
+                msg_id = await tg_send(text)
+                _tg_alert_state[ticker] = {"msg_id": msg_id, "last_sent_spread": spread}
+                log.info("TG escalated: %s spread=%+.3f", ticker, spread)
+    else:
+        if alert_st is not None:
+            if alert_st.get("msg_id"):
+                text = _format_alert_text(ticker, spread, avg30, price_mexc, price_stock, closed=True)
+                await tg_edit(alert_st["msg_id"], text)
+                log.info("TG closed: %s spread=%+.3f", ticker, spread)
+            del _tg_alert_state[ticker]
 
 
 async def tg_send_top10(chat_id: str = "") -> None:
-    """Топ-10 тикеров по абсолютному значению спреда."""
-    candidates = [
-        (t, s["spread"], s.get("price_mexc", 0), s.get("price_stock", 0))
-        for t, s in state["snapshots"].items()
-        if s.get("spread") is not None and s.get("status") != "error"
-    ]
+    candidates = []
+    for t, s in state["snapshots"].items():
+        if s.get("spread") is None or s.get("status") == "error":
+            continue
+        spread = s["spread"]
+        avg30  = s.get("avg30")
+        dev    = abs(spread - avg30) if avg30 is not None else abs(spread)
+        candidates.append((t, spread, avg30, s.get("price_mexc", 0), s.get("price_stock", 0), dev))
+
     if not candidates:
         await tg_send("Нет данных.", chat_id)
         return
 
-    candidates.sort(key=lambda x: abs(x[1]), reverse=True)
+    candidates.sort(key=lambda x: x[5], reverse=True)
     top = candidates[:10]
 
-    lines = ["📊 <b>Топ-10 спредов MEXC vs Stock</b>\n"]
-    for i, (ticker, spread, p_mexc, p_stock) in enumerate(top, 1):
-        arrow = "📈" if spread > 0 else "📉"
+    lines = ["📊 <b>Топ-10 спредов MEXC vs Stock</b>"]
+    for i, (ticker, spread, avg30, p_mexc, p_stock, dev) in enumerate(top, 1):
+        circle  = "🔴" if spread > 0 else "🟢"
+        action  = "шорт" if spread > 0 else "лонг"
+        avg_str = f"{avg30:+.3f}%" if avg30 is not None else "N/A"
+        dev_str = f"{dev:+.3f}%" if avg30 is not None else "N/A"
         lines.append(
-            f"{i}. {arrow} <b>{ticker}</b>  {spread:+.3f}%\n"
-            f"   MEXC <code>${p_mexc:.4f}</code> · Yahoo <code>${p_stock:.4f}</code>"
+            f"\n{i}. {circle} <b>{ticker}</b>  {spread:+.3f}%  ({action})\n"
+            f"   MEXC <code>${p_mexc:.4f}</code>  ·  Yahoo <code>${p_stock:.4f}</code>\n"
+            f"   avg30: <code>{avg_str}</code>  |  откл: <code>{dev_str}</code>\n"
+            f"   ─────────────────────"
         )
+
     await tg_send("\n".join(lines), chat_id)
 
 
-async def tg_send_jump_alert(ticker: str, spread: float, prev: float,
-                              price_mexc: float, price_stock: float) -> None:
-    """Уведомление о скачке спреда на SPREAD_JUMP_THRESHOLD%+."""
-    delta = spread - prev
-    arrow = "📈" if delta > 0 else "📉"
-    direction = "PREMIUM" if spread > 0 else "DISCOUNT"
-    text = (
-        f"⚡ <b>Спред скакнул: {ticker}</b>\n"
-        f"{arrow} {direction}\n"
-        f"Было: <code>{prev:+.3f}%</code> → Стало: <code>{spread:+.3f}%</code>\n"
-        f"Изменение: <b>{delta:+.3f}%</b>\n"
-        f"MEXC <code>${price_mexc:.4f}</code> · Yahoo <code>${price_stock:.4f}</code>"
-    )
-    await tg_send(text)
-
-
-# Cooldown для jump-алертов: не чаще раза в 5 минут на тикер
-_jump_alert_ts: dict[str, float] = {}
-JUMP_COOLDOWN = int(os.getenv("JUMP_COOLDOWN", "300"))
-
-
 async def tg_bot_polling() -> None:
-    """Long-polling бот. Команда /chart → топ-10 спредов."""
     if not TG_TOKEN:
         return
     offset = 0
@@ -843,27 +909,22 @@ def _update_snapshot(ticker: str, price_mexc: Optional[float],
                  ticker, price_mexc, price_stock, spread,
                  f"{snap['avg7']:+.3f}" if snap["avg7"] is not None else "N/A")
 
-        # Threshold alert
+        # Threshold alert (для дашборда)
         if abs(spread) >= CONFIG["spread_threshold"]:
             send_alert(ticker, spread, price_mexc, price_stock, "threshold")
 
-        # Convergence alert: was above threshold, now near zero
+        # Convergence alert
         prev = _prev_spread.get(ticker)
         if (prev is not None
                 and abs(prev) >= CONFIG["spread_threshold"]
                 and abs(spread) <= CONFIG["convergence_threshold"]):
             send_alert(ticker, spread, price_mexc, price_stock, "convergence")
 
-        # Telegram jump alert: спред вырос на SPREAD_JUMP_THRESHOLD%+
-        if prev is not None:
-            delta = abs(spread - prev)
-            if delta >= SPREAD_JUMP_THRESHOLD:
-                now = time.time()
-                if now - _jump_alert_ts.get(ticker, 0) >= JUMP_COOLDOWN:
-                    _jump_alert_ts[ticker] = now
-                    asyncio.create_task(
-                        tg_send_jump_alert(ticker, spread, prev, price_mexc, price_stock)
-                    )
+        # Telegram алерт по отклонению от avg30
+        avg30 = snap.get("avg30")
+        asyncio.create_task(
+            tg_check_spread_alert(ticker, spread, avg30, price_mexc, price_stock)
+        )
 
         _prev_spread[ticker] = spread
 
