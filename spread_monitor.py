@@ -54,13 +54,13 @@ CONFIG = {
     "convergence_threshold": float(os.getenv("CONVERGENCE_THRESHOLD", "0.15")),  # % — spread near zero
     "web_port":              int(os.getenv("WEB_PORT", "8765")),
     "usdt_usd_rate":         float(os.getenv("USDT_USD_RATE", "1.0")),
-    "mexc_request_delay":    float(os.getenv("MEXC_REQUEST_DELAY", "1.0")),
+    "mexc_request_delay":    float(os.getenv("MEXC_REQUEST_DELAY", "0.0")),
     "force_refresh_cooldown":int(os.getenv("FORCE_REFRESH_COOLDOWN", "60")),
-    "yahoo_parallel_workers":int(os.getenv("YAHOO_WORKERS", "8")),   # parallel Yahoo fetches
+    "yahoo_parallel_workers":int(os.getenv("YAHOO_WORKERS", "1")),   # parallel Yahoo fetches
     "history_cache_ttl":     int(os.getenv("HISTORY_CACHE_TTL", "600")),  # seconds
-    "stock_cache_ttl":       int(os.getenv("STOCK_CACHE_TTL", "45")),
-    "mexc_batch_size":       int(os.getenv("MEXC_BATCH_SIZE", "4")),
-    "mexc_batch_pause":      float(os.getenv("MEXC_BATCH_PAUSE", "0.35")),
+    "stock_cache_ttl":       int(os.getenv("STOCK_CACHE_TTL", "15")),
+    "mexc_batch_size":       int(os.getenv("MEXC_BATCH_SIZE", "15")),
+    "mexc_batch_pause":      float(os.getenv("MEXC_BATCH_PAUSE", "0.0")),
 }
 
 # ─────────────────────────────────────────────
@@ -138,15 +138,13 @@ SYMBOL_MAP: dict[str, list[str]] = {
     "STX":       ["STXSTOCK_USDT",           "STXSTOCK_USDT"],
     "NVDA":      ["NVIDIA_USDT",           "NVDASTOCK_USDT"],
     "TSLA":      ["TESLA_USDT",           "TSLASTOCK_USDT"],
-    "COIN":      ["COINBASE_USDT",           "NVDASTOCK_USDT"],
+    "COIN":      ["COINBASE_USDT",           "COINSTOCK_USDT"],
     "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
-    "HOOD":      ["ROBINHOOD_USDT",           "QQQ_USDT"],
-    "BB":        ["BBSTOCK_USDT",           "BBSTOCK_USDT"],
-    "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
-   "CVX":      ["CVXSTOCK_USDT",           "CVXSTOCK_USDT"],
-    "CVX":      ["AXTISTOCK_USDT",           "AXTI_USDT"],
-  "C":        ["CSTOCK_USDT",            "CSTOCK_USDT"],
-  "AXTI":        ["AXTISTOCK_USDT",            "AXTISTOCK_USDT"],
+    "HOOD":      ["ROBINHOOD_USDT",           "HOODSTOCK_USDT"],
+    "BB":        ["BBSTOCK_USDT",             "BB_USDT"],
+    "CVX":       ["CVXSTOCK_USDT",            "CVX_USDT"],
+    "C":         ["CSTOCK_USDT",              "C_USDT"],
+    "AXTI":      ["AXTISTOCK_USDT",           "AXTI_USDT"],
 } 
 
 # ─────────────────────────────────────────────
@@ -221,12 +219,18 @@ def _set_open_column(ticker: str, open_: bool) -> None:
     _save_persisted_state()
 
 
+_last_state_save: float = 0.0
+
 def _record_history(ticker: str, spread: float) -> None:
+    global _last_state_save
+    now = time.time()
     hist = state["spread_history"].setdefault(ticker, [])
-    hist.append({"t": time.time(), "v": round(spread, 4)})
-    cutoff = time.time() - 180 * 86400
+    hist.append({"t": now, "v": round(spread, 4)})
+    cutoff = now - 180 * 86400
     state["spread_history"][ticker] = [h for h in hist if h["t"] > cutoff]
-    _save_persisted_state()
+    if now - _last_state_save >= 300:
+        _last_state_save = now
+        _save_persisted_state()
 
 
 def _trend_summary(ticker: str) -> dict:
@@ -352,36 +356,68 @@ def get_market_session() -> str:
 # YAHOO FINANCE  (single ticker)
 # ══════════════════════════════════════════════════════════════════
 
-def get_stock_price(ticker: str) -> tuple[Optional[float], str]:
-    session = get_market_session()
+def fetch_all_yahoo_prices(tickers: list) -> dict:
+    """Батч-запрос Yahoo батчами по 50. prepost=True для всех сессий."""
+    session_label = get_market_session()
+    now_ts = time.time()
+    results = {}
+    need = []
+    for t in tickers:
+        c = _stock_cache.get(t)
+        if c and now_ts - float(c.get("ts", 0)) < CONFIG["stock_cache_ttl"]:
+            results[t] = (c["price"], session_label)
+        else:
+            need.append(t)
+    if not need:
+        return results
+    import time as _t
+    t0 = _t.time()
+    for i in range(0, len(need), 50):
+        batch = need[i:i + 50]
+        try:
+            df = yf.download(
+                tickers=" ".join(batch),
+                period="2d", interval="1m",
+                prepost=True, group_by="ticker",
+                auto_adjust=True, progress=False, threads=True,
+            )
+            for t in batch:
+                try:
+                    sub = df[t] if len(batch) > 1 else df
+                    valid = sub.dropna(subset=["Close"])
+                    if valid.empty:
+                        results[t] = (None, session_label)
+                        continue
+                    price = float(valid["Close"].iloc[-1])
+                    if price > 0:
+                        _stock_cache[t] = {"price": price, "ts": now_ts}
+                        results[t] = (price, session_label)
+                    else:
+                        results[t] = (None, session_label)
+                except Exception:
+                    results[t] = (None, session_label)
+        except Exception as e:
+            log.warning("Yahoo batch error: %s", e)
+            for t in batch:
+                if t not in results:
+                    results[t] = (None, session_label)
+    ok = sum(1 for v in results.values() if v[0] is not None)
+    log.info("Yahoo batch: %d/%d tickers in %.1fs", ok, len(need), _t.time() - t0)
+    for t in need:
+        if t not in results:
+            results[t] = (None, session_label)
+    return results
+
+
+def get_stock_price(ticker: str) -> tuple:
+    """Одиночный запрос — фолбэк для probe."""
     cached = _stock_cache.get(ticker)
     now = time.time()
-    if cached and cached.get("session") == session and now - float(cached.get("ts", 0)) < CONFIG["stock_cache_ttl"]:
-        return cached.get("price"), session
-    try:
-        info = yf.Ticker(ticker).info
-        if session == "post-fri":
-            price = (info.get("postMarketPrice") or info.get("regularMarketPrice")
-                     or info.get("previousClose"))
-        elif session == "premarket":
-            price = (info.get("preMarketPrice") or info.get("currentPrice")
-                     or info.get("regularMarketPrice") or info.get("previousClose"))
-        elif session == "regular":
-            price = (info.get("currentPrice") or info.get("regularMarketPrice")
-                     or info.get("previousClose"))
-        elif session == "postmarket":
-            price = (info.get("postMarketPrice") or info.get("currentPrice")
-                     or info.get("regularMarketPrice") or info.get("previousClose"))
-        else:
-            price = info.get("regularMarketPrice") or info.get("previousClose")
-        if price:
-            price = float(price)
-            _stock_cache[ticker] = {"price": price, "session": session, "ts": now}
-            return price, session
-        log.warning("Yahoo %s: no price field", ticker)
-    except Exception as e:
-        log.warning("Yahoo %s error: %s", ticker, e)
-    return None, session
+    sess = get_market_session()
+    if cached and now - float(cached.get("ts", 0)) < CONFIG["stock_cache_ttl"]:
+        return cached.get("price"), sess
+    res = fetch_all_yahoo_prices([ticker])
+    return res.get(ticker, (None, sess))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -530,11 +566,148 @@ def record_spread(ticker: str, spread: float) -> None:
     _record_history(ticker, spread)
 
 
+# Кэш исторических средних: ticker → {avg7, avg30, ts}
+_hist_avg_cache: dict[str, dict] = {}
+HIST_AVG_TTL = int(os.getenv("HIST_AVG_TTL", "3600"))  # обновлять раз в час
+
+
 def get_spread_avg(ticker: str, days: int = 7) -> Optional[float]:
+    """Берёт avg из кэша исторических данных если есть, иначе из накопленной истории."""
+    cached = _hist_avg_cache.get(ticker)
+    if cached:
+        return cached.get(f"avg{days}")
+    # Фолбэк на накопленную историю пока кэш не заполнен
     hist = state["spread_history"].get(ticker, [])
     cutoff = time.time() - days * 86400
     vals = [h["v"] for h in hist if h["t"] > cutoff]
     return round(sum(vals) / len(vals), 3) if vals else None
+
+
+async def _calc_historical_avg(session: aiohttp.ClientSession, ticker: str) -> None:
+    """
+    Для одного тикера:
+    - Берём часовые свечи MEXC за 35 дней
+    - Фильтруем только 9:30–16:00 ET (когда открыт рынок)
+    - Усредняем цену MEXC по каждому дню
+    - Сравниваем с Yahoo close того же дня
+    - Считаем avg7/avg30
+    """
+    try:
+        import zoneinfo
+        et_tz = zoneinfo.ZoneInfo("America/New_York")
+    except Exception:
+        from datetime import timezone
+        et_tz = timezone(timedelta(hours=-4))
+
+    days = 35
+
+    # 1. Yahoo дневные свечи
+    try:
+        end_dt   = datetime.utcnow()
+        start_dt = end_dt - timedelta(days=days + 3)
+        df = yf.download(
+            tickers=ticker,
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=end_dt.strftime("%Y-%m-%d"),
+            interval="1d",
+            prepost=False,
+            auto_adjust=True,
+            progress=False,
+        )
+        if df.empty:
+            return
+        yahoo_close: dict[str, float] = {}
+        for ts, row in df.iterrows():
+            date = ts.strftime("%Y-%m-%d")
+            try:
+                c = float(row["Close"] if hasattr(row["Close"], "__float__") else row["Close"].iloc[0])
+                if c > 0:
+                    yahoo_close[date] = c
+            except Exception:
+                pass
+    except Exception as e:
+        log.debug("Historical Yahoo %s: %s", ticker, e)
+        return
+
+    if not yahoo_close:
+        return
+
+    # 2. MEXC часовые свечи — только 9:30–16:00 ET
+    candidates = SYMBOL_MAP.get(ticker, [f"{ticker}STOCK_USDT", f"{ticker}_USDT"])
+    divisor    = SPLIT_DIVISOR.get(ticker, 1.0)
+    mexc_market: dict[str, list[float]] = {}
+
+    for symbol in candidates:
+        url = (f"https://contract.mexc.com/api/v1/contract/kline/{symbol}"
+               f"?interval=Hour1&limit={days * 24 + 48}")
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    continue
+                raw = await resp.json(content_type=None)
+                if not raw.get("success"):
+                    continue
+                data   = raw.get("data", {})
+                times  = data.get("time", [])
+                closes = data.get("close", [])
+                if not times:
+                    continue
+                from datetime import timezone as _tz
+                utc = _tz.utc
+                for ts_raw, c_raw in zip(times, closes):
+                    ts_int = int(ts_raw)
+                    if ts_int > 1e12:
+                        ts_int //= 1000
+                    dt_utc = datetime.utcfromtimestamp(ts_int).replace(tzinfo=utc)
+                    dt_et  = dt_utc.astimezone(et_tz)
+                    hm     = dt_et.hour * 60 + dt_et.minute
+                    # только 9:30–16:00 ET в будни
+                    if 570 <= hm < 960 and dt_et.weekday() < 5:
+                        date = dt_et.strftime("%Y-%m-%d")
+                        mexc_market.setdefault(date, []).append(float(c_raw) / divisor)
+                if mexc_market:
+                    break
+        except Exception as e:
+            log.debug("Historical MEXC %s %s: %s", ticker, symbol, e)
+
+    if not mexc_market:
+        return
+
+    # 3. Считаем дневной спред
+    daily_spreads: list[float] = []
+    for date in sorted(set(yahoo_close) & set(mexc_market)):
+        stock_p = yahoo_close[date]
+        mexc_p  = sum(mexc_market[date]) / len(mexc_market[date])
+        if stock_p > 0 and mexc_p > 0:
+            daily_spreads.append(((mexc_p - stock_p) / stock_p) * 100)
+
+    if not daily_spreads:
+        return
+
+    avg7  = round(sum(daily_spreads[-7:])  / len(daily_spreads[-7:]),  3)
+    avg30 = round(sum(daily_spreads[-30:]) / len(daily_spreads[-30:]), 3)
+
+    _hist_avg_cache[ticker] = {
+        "avg7":  avg7,
+        "avg30": avg30,
+        "ts":    time.time(),
+        "days":  len(daily_spreads),
+    }
+
+
+async def _refresh_historical_avgs(session: aiohttp.ClientSession) -> None:
+    """Раз в час обновляет исторические avg для всех тикеров."""
+    while True:
+        log.info("Historical avgs: refreshing %d tickers...", len(CONFIG["tickers"]))
+        t0 = time.time()
+        for ticker in CONFIG["tickers"]:
+            cached = _hist_avg_cache.get(ticker)
+            if cached and time.time() - cached["ts"] < HIST_AVG_TTL:
+                continue
+            await _calc_historical_avg(session, ticker)
+            await asyncio.sleep(0.15)
+        log.info("Historical avgs done in %.0fs", time.time() - t0)
+        await asyncio.sleep(HIST_AVG_TTL)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -542,7 +715,7 @@ def get_spread_avg(ticker: str, days: int = 7) -> Optional[float]:
 # ══════════════════════════════════════════════════════════════════
 
 _force_refresh_event = asyncio.Event()
-_yahoo_executor = ThreadPoolExecutor(max_workers=CONFIG["yahoo_parallel_workers"])
+_yahoo_executor = ThreadPoolExecutor(max_workers=1)
 _stock_cache: dict[str, dict[str, float | str | None]] = {}
 
 
@@ -555,6 +728,7 @@ async def monitor_loop() -> None:
     async with aiohttp.ClientSession(connector=connector) as session:
         asyncio.create_task(fetch_all_leverage(session))
         asyncio.create_task(tg_bot_polling())
+        asyncio.create_task(_refresh_historical_avgs(session))
         while True:
             _force_refresh_event.clear()
             await run_full_cycle(session)
@@ -573,29 +747,28 @@ async def run_full_cycle(session: aiohttp.ClientSession) -> None:
     loop = asyncio.get_event_loop()
     tickers = CONFIG["tickers"]
 
-    yahoo_futures = {
-        ticker: loop.run_in_executor(_yahoo_executor, get_stock_price, ticker)
-        for ticker in tickers
-    }
+    # Yahoo батч в executor параллельно с MEXC
+    yahoo_future = loop.run_in_executor(_yahoo_executor, fetch_all_yahoo_prices, tickers)
 
     mexc_prices: dict[str, Optional[float]] = {}
-    batch_size = max(1, CONFIG["mexc_batch_size"])
-    batch_pause = max(0.0, CONFIG["mexc_batch_pause"])
+    batch_size    = max(1, CONFIG["mexc_batch_size"])
+    batch_pause   = max(0.0, CONFIG["mexc_batch_pause"])
     request_delay = max(0.0, CONFIG["mexc_request_delay"])
 
     for i in range(0, len(tickers), batch_size):
         batch = tickers[i:i + batch_size]
-        results = await asyncio.gather(*(get_mexc_price(session, ticker) for ticker in batch))
+        results = await asyncio.gather(*(get_mexc_price(session, t) for t in batch))
         for ticker, price in zip(batch, results):
             mexc_prices[ticker] = price
-        if i + batch_size < len(tickers):
+        if batch_pause and i + batch_size < len(tickers):
             await asyncio.sleep(batch_pause)
         if request_delay:
             await asyncio.sleep(request_delay)
 
+    yahoo_prices = await yahoo_future
     for ticker in tickers:
-        price_stock, session_label = await yahoo_futures[ticker]
-        price_mexc = mexc_prices[ticker]
+        price_stock, session_label = yahoo_prices.get(ticker, (None, get_market_session()))
+        price_mexc = mexc_prices.get(ticker)
         _update_snapshot(ticker, price_mexc, price_stock, session_label)
 
     state["last_update"] = datetime.now().strftime("%H:%M:%S")
