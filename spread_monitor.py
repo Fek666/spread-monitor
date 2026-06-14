@@ -142,7 +142,7 @@ SYMBOL_MAP: dict[str, list[str]] = {
     "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
     "HOOD":      ["ROBINHOOD_USDT",           "HOODSTOCK_USDT"],
     "BB":        ["BBSTOCK_USDT",             "BB_USDT"],
-    "CVX":       ["CVXSTOCK_USDT",            "CVX_USDT"],
+    "CVX":       ["CVXSTOCK_USDT",            "CVXSTOCK_USDT"],
     "C":         ["CSTOCK_USDT",              "C_USDT"],
     "AXTI":      ["AXTISTOCK_USDT",           "AXTI_USDT"],
 } 
