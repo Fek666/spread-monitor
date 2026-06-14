@@ -39,12 +39,12 @@ CONFIG = {
         "TICKERS",
         "MU,CSCO,NVDA,TSLA,INTC,NBIS,SNDK,CRCL,MRVL,GOOGL,MSTR,AMD,DRAM,AAPL,BABA,"
         "HIMS,PLTR,META,MSFT,RKLB,QQQ,STX,ASTS,IREN,COIN,WDC,GE,PANW,INTU,ARM,"
-        "COHR,AMZN,SPOT,SHOP,CRWV,TXN,TSM,QCOM,UBER,CRWD,VRT,ASML,IONQ,LITE,IBM,ABBV,"
-        "LLY,ORCL,JPM,NKE,FIG,AMAT,ONDS,ADBE,VZ,SOXX,HOOD,SNOW,USAR,MA,JD,CRM,"
-        "XOM,C,WFC,GME,BA,PYPL,SBUX,PG,LRCX,SMCI,AVGO,V,LMT,OXY,KO,PAYP,WMT,"
-        "CVX,RDDT,BAC,GEV,COST,RTX,UNH,PDD,COP,MCD,FUTU,KLAC,CBRS,FLNC,"
+        "COHR,AMZN,SPOT,SHOP,CRWV,TXN,TSM,QCOM,UBER,CRWD,VRT,ASML,IONQ,LITE,IBM,"
+        "LLY,ORCL,JPM,AMAT,ONDS,ADBE,SOXX,HOOD,SNOW,USAR,MA,JD,CRM,"
+        "XOM,C,GME,BA,LRCX,SMCI,AVGO,V,LMT,OXY,PAYP,WMT,"
+        "CVX,RDDT,BAC,GEV,COST,UNH,PDD,COP,MCD,FUTU,CBRS,FLNC,"
         "AAOI,HPE,QNT,BB,EWY,HD,DIS,GLW,BE,XLE,NVO,STX,"
-        "RDW,NOK,EWT,LUNR,APP,BRK-B,APLD,SHLD,INFQ,EWJ"
+        "RDW,NOK,EWT,LUNR,APP,BRK-B,APLD,SHLD,INFQ,EWJ,AXTI,"
       
  
     ).split(",")],
@@ -136,16 +136,17 @@ SYMBOL_MAP: dict[str, list[str]] = {
     "005380.KS":   ["HYUNDAI_USDT",       "HYUNDAISTOCK_USDT"],
     "US30":      ["US30_USDT",          "US30STOCK_USDT"],
     "STX":       ["STXSTOCK_USDT",           "STXSTOCK_USDT"],
-    "RTXSTOCK":  ["RTX_USDT",           "RTXSTOCK_USDT"],
     "NVDA":      ["NVIDIA_USDT",           "NVDASTOCK_USDT"],
     "TSLA":      ["TESLA_USDT",           "TSLASTOCK_USDT"],
     "COIN":      ["COINBASE_USDT",           "NVDASTOCK_USDT"],
     "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
     "HOOD":      ["ROBINHOOD_USDT",           "QQQ_USDT"],
-    "BB":        ["BBSTOCK_USDT",           "BB_USDT"],
+    "BB":        ["BBSTOCK_USDT",           "BBSTOCK_USDT"],
     "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
-   "CVX":      ["CVXSTOCK_USDDT",           "CVXSTOCK_USDT"],
-
+   "CVX":      ["CVXSTOCK_USDT",           "CVXSTOCK_USDT"],
+    "CVX":      ["AXTISTOCK_USDT",           "AXTI_USDT"],
+  "C":        ["CSTOCK_USDT",            "CSTOCK_USDT"],
+  "AXTI":        ["AXTISTOCK_USDT",            "AXTISTOCK_USDT"],
 } 
 
 # ─────────────────────────────────────────────
