@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 import aiohttp
+import websockets
 import yfinance as yf
 from dotenv import load_dotenv
 import os
@@ -49,7 +50,7 @@ CONFIG = {
  
     ).split(",")],
     "spread_threshold":      float(os.getenv("SPREAD_THRESHOLD", "0.7")),
-    "check_interval":        int(os.getenv("CHECK_INTERVAL", "8")),
+    "check_interval":        int(os.getenv("CHECK_INTERVAL", "15")),
     "alert_cooldown":        int(os.getenv("ALERT_COOLDOWN", "60")),
     "convergence_threshold": float(os.getenv("CONVERGENCE_THRESHOLD", "0.15")),  # % — spread near zero
     "web_port":              int(os.getenv("WEB_PORT", "8765")),
@@ -59,8 +60,8 @@ CONFIG = {
     "yahoo_parallel_workers":int(os.getenv("YAHOO_WORKERS", "1")),   # parallel Yahoo fetches
     "history_cache_ttl":     int(os.getenv("HISTORY_CACHE_TTL", "600")),  # seconds
     "stock_cache_ttl":       int(os.getenv("STOCK_CACHE_TTL", "15")),
-    "mexc_batch_size":       int(os.getenv("MEXC_BATCH_SIZE", "15")),
-    "mexc_batch_pause":      float(os.getenv("MEXC_BATCH_PAUSE", "0.0")),
+    "mexc_batch_size":       int(os.getenv("MEXC_BATCH_SIZE", "8")),
+    "mexc_batch_pause":      float(os.getenv("MEXC_BATCH_PAUSE", "0.5")),
 }
 
 # ─────────────────────────────────────────────
@@ -104,50 +105,71 @@ SPREAD_JUMP_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
 # CUSTOM SYMBOL MAPPING
 # ─────────────────────────────────────────────
 SYMBOL_MAP: dict[str, list[str]] = {
-    "SPCX":      ["SPCX_USDT",           "SPCXSTOCK_USDT"],
-    "AAOI":      ["AAOI_USDT",           "AAOISTOCK_USDT"],
+    "SPCX":      ["SPCXSTOCK_USDT",      "SPCX_USDT"],
+    "AAOI":      ["AAOISTOCK_USDT",      "AAOI_USDT"],
     "NAS100":    ["NAS100_USDT",         "NAS100STOCK_USDT"],
-    "HPE":       ["HPE_USDT",            "HPESTOCK_USDT"],
-    "ANTHROPIC": ["ANTHROPIC_USDT",      "ANTHROPICSTOCK_USDT"],
-    "OPENAI":    ["OPENAI_USDT",         "OPENAISTOCK_USDT"],
+    "HPE":       ["HPESTOCK_USDT",       "HPE_USDT"],
+    "ANTHROPIC": ["ANTHROPICSTOCK_USDT", "ANTHROPIC_USDT"],
+    "OPENAI":    ["OPENAISTOCK_USDT",    "OPENAI_USDT"],
     "JP225":     ["JP225_USDT",          "JP225STOCK_USDT"],
-    "QNT":       ["QNTSTOCK_USDT",           "QNTSTOCK_USDT"],
-    "000660.KS":   ["SKHYNIX_USDT",       "SKHYNIXSTOCK_USDT"],
+    # QNT: крипто-токен QNT_USDT существует → ТОЛЬКО акционный символ
+    "QNT":       ["QNTSTOCK_USDT"],
+    "000660.KS": ["SKHYNIXSTOCK_USDT",   "SKHYNIX_USDT"],
     "BBSTOCK":   ["BBSTOCK_USDT"],
-    "RDW":       ["RDW_USDT",           "RDWSTOCK_USDT"],
-    "NOK":       ["NOK_USDT",           "NOKSTOCK_USDT"],
-    "EWT":       ["EWT_USDT",           "EWTSTOCK_USDT"],
-    "005930.KS":   ["SAMSUNG_USDT",       "SAMSUNGSTOCK_USDT"],
-    "LUNR":      ["LUNR_USDT",          "LUNRSTOCK_USDT"],
-    "APP":       ["APP_USDT",           "APPSTOCK_USDT"],
-    "BRK-B":     ["BRKB_USDT",          "BRKBSTOCK_USDT"],
-    "APLD":      ["APLD_USDT",          "APLDSTOCK_USDT"],
-    "SHLD":      ["SHLD_USDT",          "SHLDSTOCK_USDT"],
-    "INFQ":      ["INFQ_USDT",          "INFQSTOCK_USDT"],
-    "HK50":      ["HK50_USDT",          "HK50STOCK_USDT"],
-    "EWJ":       ["EWJ_USDT",           "EWJSTOCK_USDT"],
-    "EWY":       ["EWY_USDT",           "EWYSTOCK_USDT"],
-    "HD":        ["HD_USDT",            "HDSTOCK_USDT"],
-    "DIS":       ["DIS_USDT",           "DISSTOCK_USDT"],
-    "GLW":       ["GLW_USDT",           "GLWSTOCK_USDT"],
-    "BE":        ["BE_USDT",            "BESTOCK_USDT"],
-    "XLE":       ["XLE_USDT",           "XLESTOCK_USDT"],
-    "NVO":       ["NVO_USDT",           "NVOSTOCK_USDT"],
-    "005380.KS":   ["HYUNDAI_USDT",       "HYUNDAISTOCK_USDT"],
-    "US30":      ["US30_USDT",          "US30STOCK_USDT"],
-    "STX":       ["STXSTOCK_USDT",           "STXSTOCK_USDT"],
-    "NVDA":      ["NVIDIA_USDT",           "NVDASTOCK_USDT"],
-    "TSLA":      ["TESLA_USDT",],
-    "COIN":      ["COINBASE_USDT",           "COINSTOCK_USDT"],
-    "QQQ":       ["QQQSTOCK_USDT",           "QQQ_USDT"],
-    "HOOD":      ["ROBINHOOD_USDT",           "HOODSTOCK_USDT"],
-    "BB":        ["BBSTOCK_USDT",             "BB_USDT"],
-    "CVX":       ["CVXSTOCK_USDT",            "CVX_USDT"],
-    "C":         ["CSTOCK_USDT",],
-    "AAPL":         ["AAPLSTOCK_USDT",],
-    "BABA":         ["BABASTOCK_USDT",],
-    "AXTI":      ["AXTISTOCK_USDT",           "AXTI_USDT"],
-} 
+    "RDW":       ["RDWSTOCK_USDT",       "RDW_USDT"],
+    # NOK: сначала акционный символ, чтобы не поймать крипто NOK
+    "NOK":       ["NOKSTOCK_USDT",       "NOK_USDT"],
+    "EWT":       ["EWTSTOCK_USDT",       "EWT_USDT"],
+    "005930.KS": ["SAMSUNGSTOCK_USDT",   "SAMSUNG_USDT"],
+    "LUNR":      ["LUNRSTOCK_USDT",      "LUNR_USDT"],
+    "APP":       ["APPSTOCK_USDT",       "APP_USDT"],
+    "BRK-B":     ["BRKBSTOCK_USDT",      "BRKB_USDT"],
+    "APLD":      ["APLDSTOCK_USDT",      "APLD_USDT"],
+    "SHLD":      ["SHLDSTOCK_USDT",      "SHLD_USDT"],
+    "INFQ":      ["INFQSTOCK_USDT",      "INFQ_USDT"],
+    "HK50":      ["HK50_USDT",           "HK50STOCK_USDT"],
+    "EWJ":       ["EWJSTOCK_USDT",       "EWJ_USDT"],
+    "EWY":       ["EWYSTOCK_USDT",       "EWY_USDT"],
+    "HD":        ["HDSTOCK_USDT",        "HD_USDT"],
+    "DIS":       ["DISSTOCK_USDT",       "DIS_USDT"],
+    "GLW":       ["GLWSTOCK_USDT",       "GLW_USDT"],
+    "BE":        ["BESTOCK_USDT",        "BE_USDT"],
+    "XLE":       ["XLESTOCK_USDT",       "XLE_USDT"],
+    "NVO":       ["NVOSTOCK_USDT",       "NVO_USDT"],
+    "005380.KS": ["HYUNDAISTOCK_USDT",   "HYUNDAI_USDT"],
+    "US30":      ["US30_USDT",           "US30STOCK_USDT"],
+    # STX: STX_USDT — крипто Stacks (~$0.20), акция ~$997 → ТОЛЬКО акционный
+    "STX":       ["STXSTOCK_USDT"],
+    # NVDA: NVIDIA_USDT не существует на фьючерсах → правильный символ первым
+    "NVDA":      ["NVDASTOCK_USDT",      "NVIDIA_USDT"],
+    # TSLA: добавлен фолбэк
+    "TSLA":      ["TESLA_USDT",          "TSLASTOCK_USDT"],
+    # COIN: COINBASE_USDT неверное имя → правильный первым
+    "COIN":      ["COINSTOCK_USDT",      "COINBASE_USDT"],
+    "QQQ":       ["QQQSTOCK_USDT"],
+    # HOOD: ROBINHOOD_USDT неверное имя → правильный первым
+    "HOOD":      ["HOODSTOCK_USDT",      "ROBINHOOD_USDT"],
+    # BB: BB_USDT — крипто-токен (~$0.02), даёт спред 99% → ТОЛЬКО акционный
+    "BB":        ["BBSTOCK_USDT"],
+    # CVX: CVX_USDT — Convex Finance (~$3), Chevron ~$155 → спред 99% → ТОЛЬКО акционный
+    "CVX":       ["CVXSTOCK_USDT"],
+    "C":         ["CSTOCK_USDT"],
+    "AAPL":      ["AAPLSTOCK_USDT"],
+    "BABA":      ["BABASTOCK_USDT"],
+    # AXTI: AXTI_USDT не существует как крипто-токен → убираем фолбэк
+    "AXTI":      ["AXTISTOCK_USDT"],
+    # Тикеры без маппинга — добавляем правильные имена
+    "PANW":      ["PANWSTOCK_USDT"],
+    "INTU":      ["INTUSTOCK_USDT"],
+    "ARM":       ["ARMSTOCK_USDT"],
+    "IBM":       ["IBMSTOCK_USDT"],
+    "LITE":      ["LITESTOCK_USDT"],
+    "GLW":       ["GLWSTOCK_USDT"],
+    "CRM":       ["CRMSTOCK_USDT"],
+    "XOM":       ["XOMSTOCK_USDT"],
+    "COST":      ["COSTSTOCK_USDT"],
+    "INFQ":      ["INFQSTOCK_USDT"],
+}
 
 # ─────────────────────────────────────────────
 # SPLIT ADJUSTMENTS  (applied to MEXC price)
@@ -270,40 +292,138 @@ def _get_news(ticker: str) -> list[dict]:
 _load_persisted_state()
 
 # ══════════════════════════════════════════════════════════════════
-# MEXC PRICE
+# MEXC WEBSOCKET  — реалтайм цены через одно соединение
 # ══════════════════════════════════════════════════════════════════
 
-async def get_mexc_price(session: aiohttp.ClientSession, ticker: str) -> Optional[float]:
-    candidates = SYMBOL_MAP.get(ticker, [f"{ticker}STOCK_USDT", f"{ticker}_USDT"])
-    for symbol in candidates:
-        url = f"https://contract.mexc.com/api/v1/contract/ticker?symbol={symbol}"
+# ticker → текущая цена с MEXC (обновляется WebSocket-ом)
+_mexc_prices: dict[str, float] = {}
+# ticker → MEXC symbol (заполняется при старте через HTTP once)
+_ticker_to_symbol: dict[str, str] = {}
+
+
+async def _resolve_mexc_symbols(session: aiohttp.ClientSession) -> None:
+    """Один раз при старте — определяем реальный символ на MEXC для каждого тикера."""
+    log.info("Resolving MEXC symbols for %d tickers...", len(CONFIG["tickers"]))
+
+    for ticker in CONFIG["tickers"]:
+        candidates = SYMBOL_MAP.get(ticker, [f"{ticker}STOCK_USDT", f"{ticker}_USDT"])
+        found = False
+        for symbol in candidates:
+            url = f"https://contract.mexc.com/api/v1/contract/ticker?symbol={symbol}"
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    raw = await resp.json(content_type=None)
+                    if not raw.get("success"):
+                        continue
+                    data = raw.get("data", {})
+                    if isinstance(data, list):
+                        data = data[0] if data else {}
+                    price_raw = (data.get("lastPrice") or data.get("last")
+                                 or data.get("close") or data.get("price"))
+                    if not price_raw:
+                        continue
+                    price = float(price_raw) / SPLIT_DIVISOR.get(ticker, 1.0)
+                    if price <= 0:
+                        continue
+                    _ticker_to_symbol[ticker] = symbol
+                    _mexc_prices[ticker] = price * CONFIG["usdt_usd_rate"]
+                    log.info("%-6s → %s ($%.4f)", ticker, symbol, price)
+                    found = True
+                    break
+            except Exception as e:
+                log.debug("probe %s %s: %s", ticker, symbol, e)
+            await asyncio.sleep(0.1)  # пауза между кандидатами
+
+        if not found:
+            log.warning("%-6s | no MEXC symbol found", ticker)
+
+        await asyncio.sleep(0.15)  # пауза между тикерами
+
+    log.info("Resolved %d/%d symbols", len(_ticker_to_symbol), len(CONFIG["tickers"]))
+
+
+# symbol → ticker (обратный маппинг для WebSocket)
+_symbol_to_ticker: dict[str, str] = {}
+
+
+async def _mexc_websocket_loop() -> None:
+    """Постоянное WebSocket соединение к MEXC — пушит обновления цен."""
+    WS_URL = "wss://contract.mexc.com/edge"
+
+    while True:
+        if not _ticker_to_symbol:
+            await asyncio.sleep(1)
+            continue
+
+        # Строим обратный маппинг symbol → ticker
+        _symbol_to_ticker.clear()
+        for ticker, symbol in _ticker_to_symbol.items():
+            _symbol_to_ticker[symbol] = ticker
+
+        symbols = list(_ticker_to_symbol.values())
+        log.info("WebSocket: connecting, subscribing to %d symbols...", len(symbols))
+
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
-                raw = await resp.json(content_type=None)
-                if not raw.get("success"):
-                    continue
-                data = raw.get("data", {})
-                if isinstance(data, list):
-                    data = data[0] if data else {}
-                price_raw = (data.get("lastPrice") or data.get("last")
-                             or data.get("close") or data.get("price"))
-                if not price_raw:
-                    continue
-                price = float(price_raw)
-                if price > 0:
-                    divisor = SPLIT_DIVISOR.get(ticker, 1.0)
-                    if divisor != 1.0:
-                        log.info("%-6s | MEXC raw=%.4f ÷ %.0f (split) = %.4f",
-                                 ticker, price, divisor, price / divisor)
-                    price = price / divisor
-                    log.info("%-6s | MEXC %-20s → $%.4f", ticker, symbol, price)
-                    return price * CONFIG["usdt_usd_rate"]
-        except asyncio.TimeoutError:
-            log.warning("MEXC %s timeout", symbol)
+            async with websockets.connect(
+                WS_URL,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=5,
+            ) as ws:
+                # Подписываемся батчами по 30 (лимит MEXC)
+                for i in range(0, len(symbols), 30):
+                    batch = symbols[i:i + 30]
+                    sub_msg = json.dumps({
+                        "method": "sub.ticker",
+                        "param": {"symbol": batch} if len(batch) > 1 else {"symbol": batch[0]},
+                    })
+                    await ws.send(sub_msg)
+                    await asyncio.sleep(0.1)
+
+                log.info("WebSocket: subscribed, receiving prices...")
+
+                async for raw_msg in ws:
+                    try:
+                        msg = json.loads(raw_msg)
+                    except Exception:
+                        continue
+
+                    channel = msg.get("channel", "")
+                    data    = msg.get("data", {})
+
+                    if channel != "push.ticker" or not data:
+                        continue
+
+                    symbol    = data.get("symbol", "")
+                    price_raw = (data.get("lastPrice") or data.get("last")
+                                 or data.get("close") or data.get("price"))
+
+                    if not symbol or not price_raw:
+                        continue
+
+                    ticker = _symbol_to_ticker.get(symbol)
+                    if not ticker:
+                        continue
+
+                    price = float(price_raw) / SPLIT_DIVISOR.get(ticker, 1.0)
+                    if price <= 0:
+                        continue
+
+                    price *= CONFIG["usdt_usd_rate"]
+
+                    # Проверка коллизии крипто/акция
+                    stock_price = _stock_cache.get(ticker, {}).get("price")
+                    if stock_price and stock_price > 0:
+                        if price / stock_price > 5 or stock_price / price > 5:
+                            log.warning("%-6s price mismatch WS=%.4f Stock=%.4f — skipping",
+                                        ticker, price, stock_price)
+                            continue
+
+                    _mexc_prices[ticker] = price
+
         except Exception as e:
-            log.debug("MEXC %s error: %s", symbol, e)
-    log.warning("%-6s | MEXC: no price found", ticker)
-    return None
+            log.warning("WebSocket error: %s — reconnecting in 3s", e)
+            await asyncio.sleep(3)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -790,11 +910,22 @@ async def monitor_loop() -> None:
     log.info("Monitor started | tickers=%d | interval=%ss | threshold=%.2f%%",
              len(CONFIG["tickers"]), CONFIG["check_interval"], CONFIG["spread_threshold"])
 
-    connector = aiohttp.TCPConnector(limit_per_host=1)
+    connector = aiohttp.TCPConnector(limit_per_host=10, limit=30)
     async with aiohttp.ClientSession(connector=connector) as session:
+        # 1. Резолвим символы MEXC (один HTTP-запрос на тикер при старте)
+        await _resolve_mexc_symbols(session)
+
+        # 2. Запускаем WebSocket — будет держать цены актуальными в реальном времени
+        asyncio.create_task(_mexc_websocket_loop())
+
+        # 3. Прочие фоновые задачи
         asyncio.create_task(fetch_all_leverage(session))
         asyncio.create_task(tg_bot_polling())
         asyncio.create_task(_refresh_historical_avgs(session))
+
+        # 4. Даём WebSocket секунду подключиться и получить первые цены
+        await asyncio.sleep(2)
+
         while True:
             _force_refresh_event.clear()
             await run_full_cycle(session)
@@ -808,34 +939,21 @@ async def monitor_loop() -> None:
 
 async def run_full_cycle(session: aiohttp.ClientSession) -> None:
     """
-    Yahoo stays parallel; MEXC is fetched in small bounded batches with pauses.
+    MEXC цены уже актуальны из WebSocket (_mexc_prices).
+    Здесь только обновляем Yahoo и пересчитываем спреды.
     """
     loop = asyncio.get_event_loop()
     tickers = CONFIG["tickers"]
 
-    # Yahoo батч в executor параллельно с MEXC
-    yahoo_future = loop.run_in_executor(_yahoo_executor, fetch_all_yahoo_prices, tickers)
+    yahoo_prices = await loop.run_in_executor(
+        _yahoo_executor, fetch_all_yahoo_prices, tickers
+    )
 
-    mexc_prices: dict[str, Optional[float]] = {}
-    batch_size    = max(1, CONFIG["mexc_batch_size"])
-    batch_pause   = max(0.0, CONFIG["mexc_batch_pause"])
-    request_delay = max(0.0, CONFIG["mexc_request_delay"])
-
-    for i in range(0, len(tickers), batch_size):
-        batch = tickers[i:i + batch_size]
-        results = await asyncio.gather(*(get_mexc_price(session, t) for t in batch))
-        for ticker, price in zip(batch, results):
-            mexc_prices[ticker] = price
-        if batch_pause and i + batch_size < len(tickers):
-            await asyncio.sleep(batch_pause)
-        if request_delay:
-            await asyncio.sleep(request_delay)
-
-    yahoo_prices = await yahoo_future
+    session_label = get_market_session()
     for ticker in tickers:
-        price_stock, session_label = yahoo_prices.get(ticker, (None, get_market_session()))
-        price_mexc = mexc_prices.get(ticker)
-        _update_snapshot(ticker, price_mexc, price_stock, session_label)
+        price_stock, sess_lbl = yahoo_prices.get(ticker, (None, session_label))
+        price_mexc = _mexc_prices.get(ticker)
+        _update_snapshot(ticker, price_mexc, price_stock, sess_lbl)
 
     state["last_update"] = datetime.now().strftime("%H:%M:%S")
     state["status"] = "running"
@@ -895,6 +1013,13 @@ def _update_snapshot(ticker: str, price_mexc: Optional[float],
         snap["status"] = "error"
         snap["error"]  = f"{'MEXC' if price_mexc is None else 'Yahoo'} unavailable"
         log.info("%-6s | data unavailable", ticker)
+    elif price_stock > 0 and (price_mexc / price_stock > 5 or price_stock / price_mexc > 5):
+        # Цены отличаются более чем в 5 раз — скорее всего поймали крипто-токен вместо акции
+        snap["status"] = "error"
+        snap["error"]  = f"Price mismatch (MEXC={price_mexc:.4f} vs Stock={price_stock:.4f}) — wrong symbol?"
+        snap["price_mexc"] = None
+        log.warning("%-6s | PRICE MISMATCH MEXC=%.4f Stock=%.4f — likely crypto token collision!",
+                    ticker, price_mexc, price_stock)
     else:
         spread = calculate_spread(price_mexc, price_stock)
         snap["spread"] = round(spread, 4)
