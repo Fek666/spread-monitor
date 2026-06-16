@@ -370,56 +370,75 @@ async def _mexc_websocket_loop() -> None:
                 ping_timeout=10,
                 close_timeout=5,
             ) as ws:
-                # Подписываемся батчами по 30 (лимит MEXC)
-                for i in range(0, len(symbols), 30):
-                    batch = symbols[i:i + 30]
+                # MEXC sub.ticker принимает ОДИН символ за раз — батч-массив не поддерживается
+                # и при попытке батча подписка может тихо не сработать (старая цена зависает навечно)
+                for symbol in symbols:
                     sub_msg = json.dumps({
                         "method": "sub.ticker",
-                        "param": {"symbol": batch} if len(batch) > 1 else {"symbol": batch[0]},
+                        "param": {"symbol": symbol},
                     })
                     await ws.send(sub_msg)
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.03)
 
                 log.info("WebSocket: subscribed, receiving prices...")
 
-                async for raw_msg in ws:
-                    try:
-                        msg = json.loads(raw_msg)
-                    except Exception:
-                        continue
+                last_seen: dict[str, float] = {}  # ticker → timestamp последнего обновления
 
-                    channel = msg.get("channel", "")
-                    data    = msg.get("data", {})
+                async def _staleness_watchdog():
+                    """Если цена не обновлялась >60с — считаем её протухшей и убираем."""
+                    while True:
+                        await asyncio.sleep(30)
+                        now = time.time()
+                        for ticker in list(_mexc_prices.keys()):
+                            ts = last_seen.get(ticker, 0)
+                            if now - ts > 60:
+                                log.warning("%-6s | MEXC price stale (no WS update >60s) — clearing", ticker)
+                                _mexc_prices.pop(ticker, None)
 
-                    if channel != "push.ticker" or not data:
-                        continue
+                watchdog_task = asyncio.create_task(_staleness_watchdog())
 
-                    symbol    = data.get("symbol", "")
-                    price_raw = (data.get("lastPrice") or data.get("last")
-                                 or data.get("close") or data.get("price"))
-
-                    if not symbol or not price_raw:
-                        continue
-
-                    ticker = _symbol_to_ticker.get(symbol)
-                    if not ticker:
-                        continue
-
-                    price = float(price_raw) / SPLIT_DIVISOR.get(ticker, 1.0)
-                    if price <= 0:
-                        continue
-
-                    price *= CONFIG["usdt_usd_rate"]
-
-                    # Проверка коллизии крипто/акция
-                    stock_price = _stock_cache.get(ticker, {}).get("price")
-                    if stock_price and stock_price > 0:
-                        if price / stock_price > 5 or stock_price / price > 5:
-                            log.warning("%-6s price mismatch WS=%.4f Stock=%.4f — skipping",
-                                        ticker, price, stock_price)
+                try:
+                    async for raw_msg in ws:
+                        try:
+                            msg = json.loads(raw_msg)
+                        except Exception:
                             continue
 
-                    _mexc_prices[ticker] = price
+                        channel = msg.get("channel", "")
+                        data    = msg.get("data", {})
+
+                        if channel != "push.ticker" or not data:
+                            continue
+
+                        symbol    = data.get("symbol", "")
+                        price_raw = (data.get("lastPrice") or data.get("last")
+                                     or data.get("close") or data.get("price"))
+
+                        if not symbol or not price_raw:
+                            continue
+
+                        ticker = _symbol_to_ticker.get(symbol)
+                        if not ticker:
+                            continue
+
+                        price = float(price_raw) / SPLIT_DIVISOR.get(ticker, 1.0)
+                        if price <= 0:
+                            continue
+
+                        price *= CONFIG["usdt_usd_rate"]
+
+                        # Проверка коллизии крипто/акция
+                        stock_price = _stock_cache.get(ticker, {}).get("price")
+                        if stock_price and stock_price > 0:
+                            if price / stock_price > 5 or stock_price / price > 5:
+                                log.warning("%-6s price mismatch WS=%.4f Stock=%.4f — skipping",
+                                            ticker, price, stock_price)
+                                continue
+
+                        _mexc_prices[ticker] = price
+                        last_seen[ticker] = time.time()
+                finally:
+                    watchdog_task.cancel()
 
         except Exception as e:
             log.warning("WebSocket error: %s — reconnecting in 3s", e)
