@@ -621,6 +621,9 @@ async def tg_send(text: str, chat_id: str = "") -> int:
         async with aiohttp.ClientSession() as s:
             resp = await s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8))
             data = await resp.json()
+            if not data.get("ok"):
+                log.warning("Telegram API error: %s", data.get("description", data))
+                return 0
             return data.get("result", {}).get("message_id", 0)
     except Exception as e:
         log.warning("Telegram send error: %s", e)
@@ -671,10 +674,20 @@ ALERT_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
 ALERT_STEP      = float(os.getenv("ALERT_STEP", "0.5"))
 
 
+def _log_task_exception(task: asyncio.Task) -> None:
+    """Fire-and-forget таски молча проглатывают исключения — surfacing их в лог."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        log.error("Background task failed: %s: %s", type(exc).__name__, exc)
+
+
 async def tg_check_spread_alert(ticker: str, spread: float, avg30,
                                   price_mexc: float, price_stock: float,
                                   avg7=None) -> None:
     if avg30 is None:
+        log.debug("%-6s | TG check skipped: avg30 not ready yet", ticker)
         return
     deviation  = abs(spread - avg30)
     alert_st   = _tg_alert_state.get(ticker)
@@ -908,13 +921,22 @@ async def _refresh_historical_avgs(session: aiohttp.ClientSession) -> None:
     while True:
         log.info("Historical avgs: refreshing %d tickers...", len(CONFIG["tickers"]))
         t0 = time.time()
+        done = 0
         for ticker in CONFIG["tickers"]:
             cached = _hist_avg_cache.get(ticker)
             if cached and time.time() - cached["ts"] < HIST_AVG_TTL:
                 continue
-            await _calc_historical_avg(session, ticker)
+            try:
+                await _calc_historical_avg(session, ticker)
+            except Exception as e:
+                log.warning("%-6s | historical avg failed: %s: %s", ticker, type(e).__name__, e)
+            done += 1
+            if done % 20 == 0:
+                log.info("Historical avgs progress: %d/%d (%.0fs elapsed)",
+                          done, len(CONFIG["tickers"]), time.time() - t0)
             await asyncio.sleep(0.15)
-        log.info("Historical avgs done in %.0fs", time.time() - t0)
+        log.info("Historical avgs done in %.0fs | cached=%d/%d",
+                  time.time() - t0, len(_hist_avg_cache), len(CONFIG["tickers"]))
         await asyncio.sleep(HIST_AVG_TTL)
 
 
@@ -938,12 +960,18 @@ async def monitor_loop() -> None:
         await _resolve_mexc_symbols(session)
 
         # 2. Запускаем WebSocket — будет держать цены актуальными в реальном времени
-        asyncio.create_task(_mexc_websocket_loop())
+        ws_task = asyncio.create_task(_mexc_websocket_loop())
+        ws_task.add_done_callback(_log_task_exception)
 
         # 3. Прочие фоновые задачи
-        asyncio.create_task(fetch_all_leverage(session))
-        asyncio.create_task(tg_bot_polling())
-        asyncio.create_task(_refresh_historical_avgs(session))
+        lev_task = asyncio.create_task(fetch_all_leverage(session))
+        lev_task.add_done_callback(_log_task_exception)
+
+        tg_task = asyncio.create_task(tg_bot_polling())
+        tg_task.add_done_callback(_log_task_exception)
+
+        hist_task = asyncio.create_task(_refresh_historical_avgs(session))
+        hist_task.add_done_callback(_log_task_exception)
 
         # 4. Даём WebSocket секунду подключиться и получить первые цены
         await asyncio.sleep(2)
@@ -1070,9 +1098,10 @@ def _update_snapshot(ticker: str, price_mexc: Optional[float],
         # Telegram алерт по отклонению от avg30
         avg30 = snap.get("avg30")
         avg7  = snap.get("avg7")
-        asyncio.create_task(
+        task = asyncio.create_task(
             tg_check_spread_alert(ticker, spread, avg30, price_mexc, price_stock, avg7)
         )
+        task.add_done_callback(_log_task_exception)
 
         _prev_spread[ticker] = spread
 
