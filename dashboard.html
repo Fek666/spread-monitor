@@ -166,7 +166,7 @@
   .spread-fill{height:100%;border-radius:2px;transition:width .5s ease,background .3s}
   .time-stamp{font-size:10px;color:var(--muted);margin-top:7px;font-family:'IBM Plex Mono',monospace}
 
-  /* ── AVG SPREAD ROWS ── */
+  /* ── AVG SPREAD ROW ── */
   .avg-row{display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;font-family:'IBM Plex Mono',monospace}
   .avg-label{font-size:9px;color:var(--muted);letter-spacing:.04em}
   .avg-value{font-size:10px;font-weight:500;color:var(--muted2)}
@@ -342,8 +342,7 @@ let openColumns = [];
 let notes = [];
 let trash = [];
 let newsCache = {};
-// avg spread cache: ticker → {avg7, avg30}
-let avgSpreadCache = {};
+// avg spread cache: ticker → avg
 
 // ── REFRESH BUTTON ──────────────────────────────────────────────
 let refreshCooldown = 0;   // seconds remaining
@@ -560,16 +559,14 @@ async function loadWatchlistFromServer() {
 }
 
 // ── AVG SPREAD ────────────────────────────────────────────────────
-function updateCardAvgRows(ticker, avgs) {
+function updateCardAvgRows(ticker, avg) {
   const card = document.getElementById(`card-${ticker}`);
   if (!card) return;
-  const el7  = card.querySelector('.avg-7d');
-  const el30 = card.querySelector('.avg-30d');
-  if (!el7 || !el30) return;
-  const fmt = v => { const n=parseFloat(v); return (n>=0?'+':'')+v+'%'; };
-  const cls = v => parseFloat(v)>=0?'pos':'neg';
-  el7.innerHTML  = `<span class="avg-label">7d avg</span><span class="avg-value ${cls(avgs.avg7)}">${fmt(avgs.avg7)}</span>`;
-  el30.innerHTML = `<span class="avg-label">30d avg</span><span class="avg-value ${cls(avgs.avg30)}">${fmt(avgs.avg30)}</span>`;
+  const el = card.querySelector('.avg-row');
+  if (!el) return;
+  const fmt = v => { const n=parseFloat(v); return isNaN(n)?'N/A':(n>=0?'+':'')+n.toFixed(3)+'%'; };
+  const cls = v => { const n=parseFloat(v); return isNaN(n)?'':(n>=0?'pos':'neg'); };
+  el.innerHTML = `<span class="avg-label">avg spread</span><span class="avg-value ${cls(avg)}">${fmt(avg)}</span>`;
 }
 
 function renderTrendBadge(trend) {
@@ -578,10 +575,8 @@ function renderTrendBadge(trend) {
 }
 
 function applySnapshotAvgs(s) {
-  if (s.avg7 == null || s.avg30 == null) return;
-  const card = document.getElementById(`card-${s.ticker}`);
-  if (!card) return;
-  updateCardAvgRows(s.ticker, { avg7: s.avg7.toFixed(3), avg30: s.avg30.toFixed(3) });
+  if (s.avg == null) return;
+  updateCardAvgRows(s.ticker, s.avg);
 }
 
 function queueHoverDraw(canvas, draw) {
@@ -707,8 +702,7 @@ function renderTickers(snapshots, threshold) {
       <div class="spread-bar">
         <div class="spread-fill" style="width:${fillW}%;background:${FILL_CLR[tier]};"></div>
       </div>
-      <div class="avg-row avg-7d"></div>
-      <div class="avg-row avg-30d"></div>
+      <div class="avg-row"></div>
       <div class="time-stamp">${s.time||''}</div>`;
 
     // Apply hidden state
@@ -852,6 +846,7 @@ async function loadHistory() {
     canvas.style.display  = 'block';
     drawCandles(canvas, data.candles, data.ticker);
     drawStats(data.candles);
+
   } catch(e) {
     loading.textContent = 'Error: ' + e.message;
   }
@@ -1189,6 +1184,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 
 fetchState();
 setInterval(fetchState, 2000);
+
 </script>
 
 <!-- WATCHLIST PANEL -->
