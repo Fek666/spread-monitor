@@ -645,6 +645,81 @@ async def tg_edit(message_id: int, text: str, chat_id: str = "") -> None:
         log.warning("Telegram edit error: %s", e)
 
 
+async def tg_pin(message_id: int, chat_id: str = "") -> None:
+    """Закрепить сообщение (бот должен быть администратором)."""
+    token = TG_TOKEN
+    cid   = chat_id or TG_CHAT_ID
+    if not token or not cid or not message_id:
+        return
+    url = f"https://api.telegram.org/bot{token}/pinChatMessage"
+    payload = {"chat_id": cid, "message_id": message_id, "disable_notification": True}
+    try:
+        async with aiohttp.ClientSession() as s:
+            resp = await s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8))
+            data = await resp.json()
+            if not data.get("ok"):
+                log.warning("Telegram pin error: %s", data.get("description", data))
+    except Exception as e:
+        log.warning("Telegram pin error: %s", e)
+
+
+def _build_top10_text() -> str:
+    """Строит текст топ-10 для закреплённого сообщения."""
+    candidates = []
+    for t, s in state["snapshots"].items():
+        if s.get("spread") is None or s.get("status") == "error":
+            continue
+        candidates.append((t, s["spread"], s.get("avg"), s.get("price_mexc", 0), s.get("price_stock", 0)))
+
+    if not candidates:
+        return "📊 <b>Топ-10 спредов</b>\n\nДанные загружаются…"
+
+    candidates.sort(key=lambda x: abs(x[1]), reverse=True)
+    top = candidates[:10]
+    now = datetime.now().strftime("%H:%M")
+
+    lines = [f"📊 <b>Топ-10 спредов MEXC vs Stock</b>  <i>обновлено {now}</i>"]
+    for i, (ticker, spread, avg, p_mexc, p_stock) in enumerate(top, 1):
+        circle  = "🔴" if spread > 0 else "🟢"
+        avg_str = f"{avg:+.3f}%" if avg is not None else "N/A"
+        lines.append(
+            f"\n{i}. {circle} <b>{ticker}</b>  <code>{spread:+.3f}%</code>\n"
+            f"   MEXC <code>${p_mexc:.4f}</code>  Stock <code>${p_stock:.4f}</code>\n"
+            f"   avg: <code>{avg_str}</code>"
+        )
+    return "\n".join(lines)
+
+
+# ID закреплённого сообщения (сохраняется в памяти, при рестарте создаётся заново)
+_pinned_msg_id: int = 0
+
+
+async def _pinned_top10_loop() -> None:
+    """Каждый час обновляет закреплённое сообщение с топ-10."""
+    global _pinned_msg_id
+    if not TG_TOKEN or not TG_CHAT_ID:
+        return
+
+    # Ждём пока данные загрузятся
+    await asyncio.sleep(30)
+
+    while True:
+        text = _build_top10_text()
+
+        if _pinned_msg_id == 0:
+            # Первый запуск — создаём и закрепляем
+            _pinned_msg_id = await tg_send(text)
+            if _pinned_msg_id:
+                await tg_pin(_pinned_msg_id)
+                log.info("TG pinned top10 created: msg_id=%d", _pinned_msg_id)
+        else:
+            # Редактируем существующее
+            await tg_edit(_pinned_msg_id, text)
+            log.info("TG pinned top10 updated")
+
+        await asyncio.sleep(3600)  # раз в час
+
+
 def _format_alert_text(ticker: str, spread: float, avg,
                         price_mexc: float, price_stock: float,
                         closed: bool = False, escalated: bool = False) -> str:
@@ -1017,6 +1092,9 @@ async def monitor_loop() -> None:
 
         avg_task = asyncio.create_task(_refresh_avg_cache())
         avg_task.add_done_callback(_log_task_exception)
+
+        pin_task = asyncio.create_task(_pinned_top10_loop())
+        pin_task.add_done_callback(_log_task_exception)
 
         # 4. Даём WebSocket секунду подключиться и получить первые цены
         await asyncio.sleep(2)
