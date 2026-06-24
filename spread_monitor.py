@@ -646,27 +646,25 @@ async def tg_edit(message_id: int, text: str, chat_id: str = "") -> None:
         log.warning("Telegram edit error: %s", e)
 
 
-def _format_alert_text(ticker: str, spread: float, avg30,
+def _format_alert_text(ticker: str, spread: float, avg,
                         price_mexc: float, price_stock: float,
-                        closed: bool = False, avg7=None) -> str:
+                        closed: bool = False) -> str:
     circle  = "🔴" if spread > 0 else "🟢"
     action  = "ШОРТ на MEXC" if spread > 0 else "ЛОНГ на MEXC"
-    avg7_str  = f"{avg7:+.3f}%" if avg7 is not None else "N/A"
-    avg30_str = f"{avg30:+.3f}%" if avg30 is not None else "N/A"
+    avg_str = f"{avg:+.3f}%" if avg is not None else "N/A"
 
     if closed:
         return (
             f"✅ <b>{ticker}</b> — спред вернулся в норму\n"
             f"Текущий: <code>{spread:+.3f}%</code>  "
-            f"avg30: <code>{avg30_str}</code>"
+            f"avg: <code>{avg_str}</code>"
         )
     return (
         f"{circle} <b>{ticker}</b>  —  {action}\n"
         f"├ Спред:  <code>{spread:+.3f}%</code>\n"
         f"├ MEXC:   <code>${price_mexc:.4f}</code>\n"
         f"├ Stock:  <code>${price_stock:.4f}</code>\n"
-        f"├ 7d avg: <code>{avg7_str}</code>\n"
-        f"└ 30d avg:<code>{avg30_str}</code>"
+        f"└ Avg:    <code>{avg_str}</code>"
     )
 
 # ticker → {msg_id, last_sent_spread}
@@ -684,33 +682,31 @@ def _log_task_exception(task: asyncio.Task) -> None:
         log.error("Background task failed: %s: %s", type(exc).__name__, exc)
 
 
-async def tg_check_spread_alert(ticker: str, spread: float, avg30,
-                                  price_mexc: float, price_stock: float,
-                                  avg7=None) -> None:
-    if avg30 is None:
-        log.debug("%-6s | TG check skipped: avg30 not ready yet", ticker)
+async def tg_check_spread_alert(ticker: str, spread: float, avg,
+                                  price_mexc: float, price_stock: float) -> None:
+    if avg is None:
+        log.debug("%-6s | TG check skipped: avg not ready yet", ticker)
         return
-    deviation  = abs(spread - avg30)
-    alert_st   = _tg_alert_state.get(ticker)
+    deviation = abs(spread - avg)
+    alert_st  = _tg_alert_state.get(ticker)
 
     if deviation >= ALERT_THRESHOLD:
         if alert_st is None:
-            text   = _format_alert_text(ticker, spread, avg30, price_mexc, price_stock, avg7=avg7)
+            text   = _format_alert_text(ticker, spread, avg, price_mexc, price_stock)
             msg_id = await tg_send(text)
             _tg_alert_state[ticker] = {"msg_id": msg_id, "last_sent_spread": spread}
-            log.info("TG alert: %s spread=%+.3f avg30=%+.3f", ticker, spread, avg30)
+            log.info("TG alert: %s spread=%+.3f avg=%+.3f", ticker, spread, avg)
         else:
             last = alert_st["last_sent_spread"]
             if abs(spread - last) >= ALERT_STEP:
-                text   = _format_alert_text(ticker, spread, avg30, price_mexc, price_stock, avg7=avg7)
+                text   = _format_alert_text(ticker, spread, avg, price_mexc, price_stock)
                 msg_id = await tg_send(text)
                 _tg_alert_state[ticker] = {"msg_id": msg_id, "last_sent_spread": spread}
                 log.info("TG escalated: %s spread=%+.3f", ticker, spread)
     else:
         if alert_st is not None:
             if alert_st.get("msg_id"):
-                text = _format_alert_text(ticker, spread, avg30, price_mexc, price_stock,
-                                           closed=True, avg7=avg7)
+                text = _format_alert_text(ticker, spread, avg, price_mexc, price_stock, closed=True)
                 await tg_edit(alert_st["msg_id"], text)
                 log.info("TG closed: %s spread=%+.3f", ticker, spread)
             del _tg_alert_state[ticker]
@@ -721,12 +717,11 @@ async def tg_send_top10(chat_id: str = "") -> None:
     for t, s in state["snapshots"].items():
         if s.get("spread") is None or s.get("status") == "error":
             continue
-        spread = s["spread"]
-        avg30  = s.get("avg30")
-        avg7   = s.get("avg7")
+        spread     = s["spread"]
+        avg        = s.get("avg")
         price_mexc  = s.get("price_mexc", 0)
         price_stock = s.get("price_stock", 0)
-        candidates.append((t, spread, avg30, avg7, price_mexc, price_stock))
+        candidates.append((t, spread, avg, price_mexc, price_stock))
 
     if not candidates:
         await tg_send("Нет данных.", chat_id)
@@ -736,15 +731,14 @@ async def tg_send_top10(chat_id: str = "") -> None:
     top = candidates[:10]
 
     lines = ["📊 <b>Топ-10 спредов MEXC vs Stock</b>"]
-    for i, (ticker, spread, avg30, avg7, p_mexc, p_stock) in enumerate(top, 1):
-        circle    = "🔴" if spread > 0 else "🟢"
-        action    = "шорт" if spread > 0 else "лонг"
-        avg7_str  = f"{avg7:+.3f}%"  if avg7  is not None else "N/A"
-        avg30_str = f"{avg30:+.3f}%" if avg30 is not None else "N/A"
+    for i, (ticker, spread, avg, p_mexc, p_stock) in enumerate(top, 1):
+        circle  = "🔴" if spread > 0 else "🟢"
+        action  = "шорт" if spread > 0 else "лонг"
+        avg_str = f"{avg:+.3f}%" if avg is not None else "N/A"
         lines.append(
             f"\n{i}. {circle} <b>{ticker}</b>  {spread:+.3f}%  ({action})\n"
             f"   MEXC <code>${p_mexc:.4f}</code>  ·  Stock <code>${p_stock:.4f}</code>\n"
-            f"   7d avg: <code>{avg7_str}</code>  |  30d avg: <code>{avg30_str}</code>\n"
+            f"   Avg: <code>{avg_str}</code>\n"
             f"   ─────────────────────"
         )
 
@@ -788,21 +782,39 @@ def record_spread(ticker: str, spread: float) -> None:
     _record_history(ticker, spread)
 
 
-# Кэш исторических средних: ticker → {avg7, avg30, ts}
-_hist_avg_cache: dict[str, dict] = {}
-HIST_AVG_TTL = int(os.getenv("HIST_AVG_TTL", "3600"))  # обновлять раз в час
+# avg кеш: ticker → avg (считается из тех же данных что и чарт)
+_avg_cache: dict[str, float] = {}
 
 
-def get_spread_avg(ticker: str, days: int = 7) -> Optional[float]:
-    """Берёт avg из кэша исторических данных если есть, иначе из накопленной истории."""
-    cached = _hist_avg_cache.get(ticker)
-    if cached:
-        return cached.get(f"avg{days}")
-    # Фолбэк на накопленную историю пока кэш не заполнен
-    hist = state["spread_history"].get(ticker, [])
-    cutoff = time.time() - days * 86400
-    vals = [h["v"] for h in hist if h["t"] > cutoff]
-    return round(sum(vals) / len(vals), 3) if vals else None
+def get_avg_spread(ticker: str, days: int = 90) -> Optional[float]:
+    """Возвращает avg из кеша — заполняется фоновой задачей через _get_history."""
+    return _avg_cache.get(ticker)
+
+
+async def _refresh_avg_cache() -> None:
+    """Фоновая задача: считает avg для каждого тикера из тех же свечей что и чарт."""
+    import concurrent.futures
+    while True:
+        log.info("Avg cache: refreshing %d tickers...", len(CONFIG["tickers"]))
+        t0 = time.time()
+        for ticker in CONFIG["tickers"]:
+            try:
+                def _fetch(t=ticker):
+                    candles = _get_history(t, 90)
+                    if not candles:
+                        return None
+                    closes = [c["c"] for c in candles]
+                    return round(sum(closes) / len(closes), 3)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    avg = ex.submit(_fetch).result(timeout=30)
+                if avg is not None:
+                    _avg_cache[ticker] = avg
+            except Exception as e:
+                log.debug("avg cache %s: %s", ticker, e)
+            await asyncio.sleep(0.2)
+        log.info("Avg cache done in %.0fs | %d/%d tickers",
+                 time.time() - t0, len(_avg_cache), len(CONFIG["tickers"]))
+        await asyncio.sleep(3600)  # обновляем раз в час
 
 
 async def _calc_historical_avg(session: aiohttp.ClientSession, ticker: str) -> None:
@@ -974,6 +986,9 @@ async def monitor_loop() -> None:
         hist_task = asyncio.create_task(_refresh_historical_avgs(session))
         hist_task.add_done_callback(_log_task_exception)
 
+        avg_task = asyncio.create_task(_refresh_avg_cache())
+        avg_task.add_done_callback(_log_task_exception)
+
         # 4. Даём WebSocket секунду подключиться и получить первые цены
         await asyncio.sleep(2)
 
@@ -1051,8 +1066,7 @@ def _update_snapshot(ticker: str, price_mexc: Optional[float],
         "price_mexc":  price_mexc,
         "price_stock": price_stock,
         "spread":      None,
-        "avg7":        None,
-        "avg30":       None,
+        "avg":         None,
         "status":      "ok",
         "time":        datetime.now().strftime("%H:%M:%S"),
         "split_adj":   ticker in SPLIT_DIVISOR,
@@ -1078,12 +1092,11 @@ def _update_snapshot(ticker: str, price_mexc: Optional[float],
         record_spread(ticker, spread)
         trend = _trend_summary(ticker)
         snap["trend"] = trend
-        snap["avg7"]  = get_spread_avg(ticker, 7)
-        snap["avg30"] = get_spread_avg(ticker, 30)
+        snap["avg"]   = get_avg_spread(ticker, 90)
 
-        log.info("%-6s | MEXC=%.4f  Stock=%.4f  spread=%+.3f%%  avg7=%s%%",
+        log.info("%-6s | MEXC=%.4f  Stock=%.4f  spread=%+.3f%%  avg=%s%%",
                  ticker, price_mexc, price_stock, spread,
-                 f"{snap['avg7']:+.3f}" if snap["avg7"] is not None else "N/A")
+                 f"{snap['avg']:+.3f}" if snap["avg"] is not None else "N/A")
 
         # Threshold alert (для дашборда)
         if abs(spread) >= CONFIG["spread_threshold"]:
@@ -1096,11 +1109,10 @@ def _update_snapshot(ticker: str, price_mexc: Optional[float],
                 and abs(spread) <= CONFIG["convergence_threshold"]):
             send_alert(ticker, spread, price_mexc, price_stock, "convergence")
 
-        # Telegram алерт по отклонению от avg30
-        avg30 = snap.get("avg30")
-        avg7  = snap.get("avg7")
+        # Telegram алерт по отклонению от avg
+        avg = snap.get("avg")
         task = asyncio.create_task(
-            tg_check_spread_alert(ticker, spread, avg30, price_mexc, price_stock, avg7)
+            tg_check_spread_alert(ticker, spread, avg, price_mexc, price_stock)
         )
         task.add_done_callback(_log_task_exception)
 
