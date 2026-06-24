@@ -689,33 +689,34 @@ async def tg_check_spread_alert(ticker: str, spread: float, avg,
         log.debug("%-6s | TG check skipped: avg not ready yet", ticker)
         return
 
-    deviation = abs(spread - avg)
-    alert_st  = _tg_alert_state.get(ticker)
+    abs_spread = abs(spread)
+    alert_st   = _tg_alert_state.get(ticker)
+    CLOSE_THRESHOLD = 0.3  # ниже этого — закрываем
 
-    if deviation >= ALERT_THRESHOLD:
+    if abs_spread >= ALERT_THRESHOLD:
         if alert_st is None:
-            # Первый вход в зону — новое сообщение
+            # Вход в зону — новое сообщение
             text   = _format_alert_text(ticker, spread, avg, price_mexc, price_stock)
             msg_id = await tg_send(text)
             _tg_alert_state[ticker] = {
                 "msg_id":      msg_id,
                 "last_spread": spread,
-                "peak":        abs(spread),
+                "peak":        abs_spread,
             }
             log.info("TG alert open: %s spread=%+.3f avg=%+.3f", ticker, spread, avg)
         else:
             last = alert_st["last_spread"]
             peak = alert_st.get("peak", abs(last))
 
-            if abs(spread) >= ALERT_ESCALATE and abs(spread) > peak + 0.01:
-                # Спред впервые пробил 5% (или вырос ещё дальше) — новое сообщение
+            if abs_spread >= ALERT_ESCALATE and abs_spread > peak + 0.01:
+                # Новый пик выше 5% — эскалация новым сообщением
                 text   = _format_alert_text(ticker, spread, avg, price_mexc, price_stock,
                                              escalated=True)
                 msg_id = await tg_send(text)
                 _tg_alert_state[ticker] = {
                     "msg_id":      msg_id,
                     "last_spread": spread,
-                    "peak":        abs(spread),
+                    "peak":        abs_spread,
                 }
                 log.info("TG escalation: %s spread=%+.3f", ticker, spread)
 
@@ -724,15 +725,17 @@ async def tg_check_spread_alert(ticker: str, spread: float, avg,
                 text = _format_alert_text(ticker, spread, avg, price_mexc, price_stock)
                 await tg_edit(alert_st["msg_id"], text)
                 alert_st["last_spread"] = spread
-                alert_st["peak"] = max(peak, abs(spread))
+                alert_st["peak"] = max(peak, abs_spread)
                 log.info("TG alert update: %s spread=%+.3f", ticker, spread)
-    else:
+
+    elif abs_spread < CLOSE_THRESHOLD:
         if alert_st is not None:
-            # Выход из зоны — помечаем последнее сообщение как закрытое
+            # Спред упал ниже 0.3% — закрываем
             text = _format_alert_text(ticker, spread, avg, price_mexc, price_stock, closed=True)
             await tg_edit(alert_st["msg_id"], text)
             log.info("TG alert closed: %s spread=%+.3f", ticker, spread)
             del _tg_alert_state[ticker]
+    # Между 0.3% и 1% — гистерезис, ничего не делаем
 
 
 async def tg_send_top10(chat_id: str = "") -> None:
