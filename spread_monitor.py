@@ -38,15 +38,14 @@ load_dotenv()
 CONFIG = {
     "tickers": [t.strip() for t in os.getenv(
         "TICKERS",
-        "AAL,AAOI,AAPL,ADBE,ALAB,AMAT,AMD,AMZN,APLD,APP,ARM,ASML,ASTS,AVGO,AXP,"
-        "AXTI,BA,BABA,BAC,BB,BE,BLK,BRK-B,C,CBRS,CCL,CMCSA,COHR,COIN,COP,"
-        "COST,CRCL,CRM,CRWD,CRWV,CSCO,CVX,DIS,DRAM,EWJ,EWT,EWY,FCX,FLNC,FOXA,"
-        "FUTU,GE,GEV,GLW,GME,GOOGL,HD,HIMS,HOOD,HPE,IBM,INFQ,INTC,INTU,IONQ,"
-        "IREN,ISRG,JD,JPM,KLAC,KORU,LITE,LLY,LMT,LRCX,LUNR,MA,MAR,MCD,META,"
-        "MRVL,MSFT,MSTR,MU,NBIS,NEM,NKE,NOK,NVDA,NVO,OKLO,ONDS,ORCL,OXY,"
-        "PANW,PAYP,PDD,PLTR,POET,PYPL,QBTS,QCOM,QNT,QQQ,RDDT,RDW,RGTI,RKLB,SHLD,"
-        "SHOP,SLB,SMCI,SNDK,SNOW,SONY,SPOT,SOXX,STX,TEM,TER,TSLA,TSM,TXN,UBER,"
-        "UNH,UPST,USAR,V,VRT,VST,WDC,WMT,XLE,XOM,"
+        "MU,CSCO,NVDA,TSLA,INTC,NBIS,SNDK,CRCL,MRVL,GOOGL,MSTR,AMD,DRAM,AAPL,BABA,"
+        "HIMS,PLTR,META,MSFT,RKLB,QQQ,STX,ASTS,IREN,COIN,WDC,GE,PANW,INTU,ARM,"
+        "COHR,AMZN,SPOT,SHOP,CRWV,TXN,TSM,QCOM,UBER,CRWD,VRT,ASML,IONQ,LITE,IBM,"
+        "LLY,ORCL,JPM,AMAT,ONDS,ADBE,SOXX,HOOD,SNOW,USAR,MA,JD,CRM,"
+        "XOM,C,GME,BA,LRCX,SMCI,AVGO,V,LMT,OXY,PAYP,WMT,"
+        "CVX,RDDT,BAC,GEV,COST,UNH,PDD,COP,MCD,FUTU,CBRS,FLNC,"
+        "AAOI,HPE,QNT,BB,EWY,HD,DIS,GLW,BE,XLE,NVO,STX,"
+        "RDW,NOK,EWT,LUNR,APP,BRK-B,APLD,SHLD,INFQ,EWJ,AXTI,"
       
  
     ).split(",")],
@@ -648,7 +647,7 @@ async def tg_edit(message_id: int, text: str, chat_id: str = "") -> None:
 
 def _format_alert_text(ticker: str, spread: float, avg,
                         price_mexc: float, price_stock: float,
-                        closed: bool = False) -> str:
+                        closed: bool = False, escalated: bool = False) -> str:
     circle  = "🔴" if spread > 0 else "🟢"
     action  = "ШОРТ на MEXC" if spread > 0 else "ЛОНГ на MEXC"
     avg_str = f"{avg:+.3f}%" if avg is not None else "N/A"
@@ -659,8 +658,9 @@ def _format_alert_text(ticker: str, spread: float, avg,
             f"Текущий: <code>{spread:+.3f}%</code>  "
             f"avg: <code>{avg_str}</code>"
         )
+    prefix = "🚨 ЭСКАЛАЦИЯ  " if escalated else ""
     return (
-        f"{circle} <b>{ticker}</b>  —  {action}\n"
+        f"{prefix}{circle} <b>{ticker}</b>  —  {action}\n"
         f"├ Спред:  <code>{spread:+.3f}%</code>\n"
         f"├ MEXC:   <code>${price_mexc:.4f}</code>\n"
         f"├ Stock:  <code>${price_stock:.4f}</code>\n"
@@ -669,8 +669,9 @@ def _format_alert_text(ticker: str, spread: float, avg,
 
 # ticker → {msg_id, last_sent_spread}
 _tg_alert_state: dict = {}
-ALERT_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
-ALERT_STEP      = float(os.getenv("ALERT_STEP", "0.5"))
+ALERT_THRESHOLD  = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
+ALERT_UPDATE_STEP = float(os.getenv("ALERT_UPDATE_STEP", "1.0"))
+ALERT_ESCALATE   = float(os.getenv("ALERT_ESCALATE", "5.0"))
 
 
 def _log_task_exception(task: asyncio.Task) -> None:
@@ -687,28 +688,50 @@ async def tg_check_spread_alert(ticker: str, spread: float, avg,
     if avg is None:
         log.debug("%-6s | TG check skipped: avg not ready yet", ticker)
         return
+
     deviation = abs(spread - avg)
     alert_st  = _tg_alert_state.get(ticker)
 
     if deviation >= ALERT_THRESHOLD:
         if alert_st is None:
+            # Первый вход в зону — новое сообщение
             text   = _format_alert_text(ticker, spread, avg, price_mexc, price_stock)
             msg_id = await tg_send(text)
-            _tg_alert_state[ticker] = {"msg_id": msg_id, "last_sent_spread": spread}
-            log.info("TG alert: %s spread=%+.3f avg=%+.3f", ticker, spread, avg)
+            _tg_alert_state[ticker] = {
+                "msg_id":      msg_id,
+                "last_spread": spread,
+                "peak":        abs(spread),
+            }
+            log.info("TG alert open: %s spread=%+.3f avg=%+.3f", ticker, spread, avg)
         else:
-            last = alert_st["last_sent_spread"]
-            if abs(spread - last) >= ALERT_STEP:
-                text   = _format_alert_text(ticker, spread, avg, price_mexc, price_stock)
+            last = alert_st["last_spread"]
+            peak = alert_st.get("peak", abs(last))
+
+            if abs(spread) >= ALERT_ESCALATE and abs(spread) > peak + 0.01:
+                # Спред впервые пробил 5% (или вырос ещё дальше) — новое сообщение
+                text   = _format_alert_text(ticker, spread, avg, price_mexc, price_stock,
+                                             escalated=True)
                 msg_id = await tg_send(text)
-                _tg_alert_state[ticker] = {"msg_id": msg_id, "last_sent_spread": spread}
-                log.info("TG escalated: %s spread=%+.3f", ticker, spread)
+                _tg_alert_state[ticker] = {
+                    "msg_id":      msg_id,
+                    "last_spread": spread,
+                    "peak":        abs(spread),
+                }
+                log.info("TG escalation: %s spread=%+.3f", ticker, spread)
+
+            elif abs(spread - last) >= ALERT_UPDATE_STEP:
+                # Изменение на 1%+ — редактируем то же сообщение
+                text = _format_alert_text(ticker, spread, avg, price_mexc, price_stock)
+                await tg_edit(alert_st["msg_id"], text)
+                alert_st["last_spread"] = spread
+                alert_st["peak"] = max(peak, abs(spread))
+                log.info("TG alert update: %s spread=%+.3f", ticker, spread)
     else:
         if alert_st is not None:
-            if alert_st.get("msg_id"):
-                text = _format_alert_text(ticker, spread, avg, price_mexc, price_stock, closed=True)
-                await tg_edit(alert_st["msg_id"], text)
-                log.info("TG closed: %s spread=%+.3f", ticker, spread)
+            # Выход из зоны — помечаем последнее сообщение как закрытое
+            text = _format_alert_text(ticker, spread, avg, price_mexc, price_stock, closed=True)
+            await tg_edit(alert_st["msg_id"], text)
+            log.info("TG alert closed: %s spread=%+.3f", ticker, spread)
             del _tg_alert_state[ticker]
 
 
@@ -765,7 +788,10 @@ async def tg_bot_polling() -> None:
                 msg     = update.get("message", {})
                 text    = msg.get("text", "").strip().lower()
                 chat_id = str(msg.get("chat", {}).get("id", ""))
-                if text in ("/chart", "/chart@" + TG_TOKEN.split(":")[0]):
+                log.info("TG incoming: chat=%s text=%r", chat_id, text)
+                if text == "/chart" or text.startswith("/chart@"):
+                    asyncio.create_task(tg_send_top10(chat_id))
+                elif text == "/top10" or text.startswith("/top10@"):
                     asyncio.create_task(tg_send_top10(chat_id))
         except asyncio.CancelledError:
             return
