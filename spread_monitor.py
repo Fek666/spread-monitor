@@ -717,7 +717,7 @@ async def _pinned_top10_loop() -> None:
             await tg_edit(_pinned_msg_id, text)
             log.info("TG pinned top10 updated")
 
-        await asyncio.sleep(3600)  # раз в час
+        await asyncio.sleep(900)  # раз в час
 
 
 def _format_alert_text(ticker: str, spread: float, avg,
