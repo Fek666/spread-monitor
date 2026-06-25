@@ -99,7 +99,7 @@ PERSIST_PATH = Path(__file__).parent / "dashboard_state.json"
 TG_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT_ID  = os.getenv("TELEGRAM_CHAT_ID", "")
 # Порог изменения спреда для уведомления (в %)
-SPREAD_JUMP_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
+SPREAD_JUMP_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "4.0"))
 
 # ─────────────────────────────────────────────
 # CUSTOM SYMBOL MAPPING
@@ -744,10 +744,9 @@ def _format_alert_text(ticker: str, spread: float, avg,
 
 # ticker → {msg_id, last_sent_spread}
 _tg_alert_state: dict = {}
-ALERT_THRESHOLD  = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
+ALERT_THRESHOLD  = float(os.getenv("SPREAD_JUMP_THRESHOLD", "4.0"))
 ALERT_UPDATE_STEP = float(os.getenv("ALERT_UPDATE_STEP", "1.0"))
-ALERT_ESCALATE   = float(os.getenv("ALERT_ESCALATE", "5.0"))
-
+ALERT_ESCALATE   = float(os.getenv("ALERT_ESCALATE", "8.0"))
 
 def _log_task_exception(task: asyncio.Task) -> None:
     """Fire-and-forget таски молча проглатывают исключения — surfacing их в лог."""
