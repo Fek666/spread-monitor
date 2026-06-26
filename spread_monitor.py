@@ -854,32 +854,32 @@ async def tg_bot_polling() -> None:
     offset = 0
     url = f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates"
     log.info("Telegram bot polling started")
-    async with aiohttp.ClientSession() as s:
-        while True:
-            try:
+    while True:
+        try:
+            async with aiohttp.ClientSession() as s:
                 resp = await s.get(
                     url,
-                    params={"offset": offset, "timeout": 30, "allowed_updates": '["message"]'},
-                    timeout=aiohttp.ClientTimeout(total=40),
+                    params={"offset": offset, "timeout": 0, "allowed_updates": '["message"]'},
+                    timeout=aiohttp.ClientTimeout(total=10),
                 )
                 data = await resp.json()
-                for update in data.get("result", []):
-                    offset = update["update_id"] + 1
-                    msg     = update.get("message", {})
-                    text    = msg.get("text", "").strip().lower()
-                    chat_id = str(msg.get("chat", {}).get("id", ""))
-                    log.info("TG incoming: chat=%s text=%r", chat_id, text)
-                    if text == "/chart" or text.startswith("/chart@"):
-                        t = asyncio.create_task(tg_send_top10(chat_id))
-                        t.add_done_callback(_log_task_exception)
-                    elif text == "/top10" or text.startswith("/top10@"):
-                        t = asyncio.create_task(tg_send_top10(chat_id))
-                        t.add_done_callback(_log_task_exception)
-            except asyncio.CancelledError:
-                return
-            except Exception as e:
-                log.warning("Telegram polling error: %s", e)
-                await asyncio.sleep(5)
+            for update in data.get("result", []):
+                offset = update["update_id"] + 1
+                msg     = update.get("message", {})
+                text    = msg.get("text", "").strip().lower()
+                chat_id = str(msg.get("chat", {}).get("id", ""))
+                log.info("TG incoming: chat=%s text=%r", chat_id, text)
+                if text == "/chart" or text.startswith("/chart@"):
+                    t = asyncio.create_task(tg_send_top10(chat_id))
+                    t.add_done_callback(_log_task_exception)
+                elif text == "/top10" or text.startswith("/top10@"):
+                    t = asyncio.create_task(tg_send_top10(chat_id))
+                    t.add_done_callback(_log_task_exception)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            log.warning("Telegram polling error: %s", e)
+        await asyncio.sleep(2)
 
 
 # ══════════════════════════════════════════════════════════════════
