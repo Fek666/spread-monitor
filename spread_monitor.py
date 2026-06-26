@@ -859,15 +859,13 @@ async def tg_bot_polling() -> None:
             async with aiohttp.ClientSession() as s:
                 resp = await s.get(
                     url,
-                    params={"offset": offset, "timeout": 0, "allowed_updates": '["message"]'},
-                    timeout=aiohttp.ClientTimeout(total=10),
+                    params={"offset": offset, "timeout": 25},
+                    timeout=aiohttp.ClientTimeout(total=30),
                 )
                 data = await resp.json()
-            if data.get("result"):
-                log.info("TG updates received: %d", len(data["result"]))
             for update in data.get("result", []):
                 offset = update["update_id"] + 1
-                msg     = update.get("message", {})
+                msg     = update.get("message") or update.get("channel_post") or {}
                 text    = msg.get("text", "").strip().lower()
                 chat_id = str(msg.get("chat", {}).get("id", ""))
                 log.info("TG incoming: chat=%s text=%r", chat_id, text)
@@ -881,7 +879,7 @@ async def tg_bot_polling() -> None:
             return
         except Exception as e:
             log.warning("Telegram polling error: %s", e)
-        await asyncio.sleep(2)
+            await asyncio.sleep(5)
 
 
 # ══════════════════════════════════════════════════════════════════
