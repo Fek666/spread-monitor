@@ -863,6 +863,8 @@ async def tg_bot_polling() -> None:
                     timeout=aiohttp.ClientTimeout(total=10),
                 )
                 data = await resp.json()
+            if data.get("result"):
+                log.info("TG updates received: %d", len(data["result"]))
             for update in data.get("result", []):
                 offset = update["update_id"] + 1
                 msg     = update.get("message", {})
