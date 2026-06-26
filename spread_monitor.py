@@ -99,7 +99,7 @@ PERSIST_PATH = Path(__file__).parent / "dashboard_state.json"
 TG_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT_ID  = os.getenv("TELEGRAM_CHAT_ID", "")
 # Порог изменения спреда для уведомления (в %)
-SPREAD_JUMP_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "4.0"))
+SPREAD_JUMP_THRESHOLD = float(os.getenv("SPREAD_JUMP_THRESHOLD", "1.0"))
 
 # ─────────────────────────────────────────────
 # CUSTOM SYMBOL MAPPING
@@ -700,8 +700,8 @@ async def _pinned_top10_loop() -> None:
     if not TG_TOKEN or not TG_CHAT_ID:
         return
 
-    # Ждём пока данные загрузятся
-    await asyncio.sleep(30)
+    # Ждём пока данные и avg кэш загрузятся
+    await asyncio.sleep(90)
 
     while True:
         text = _build_top10_text()
@@ -717,7 +717,7 @@ async def _pinned_top10_loop() -> None:
             await tg_edit(_pinned_msg_id, text)
             log.info("TG pinned top10 updated")
 
-        await asyncio.sleep(900)  # раз в час
+        await asyncio.sleep(3600)  # раз в час
 
 
 def _format_alert_text(ticker: str, spread: float, avg,
@@ -744,9 +744,10 @@ def _format_alert_text(ticker: str, spread: float, avg,
 
 # ticker → {msg_id, last_sent_spread}
 _tg_alert_state: dict = {}
-ALERT_THRESHOLD  = float(os.getenv("SPREAD_JUMP_THRESHOLD", "4.0"))
+ALERT_THRESHOLD  = float(os.getenv("SPREAD_JUMP_THRESHOLD", "5.0"))
 ALERT_UPDATE_STEP = float(os.getenv("ALERT_UPDATE_STEP", "1.0"))
 ALERT_ESCALATE   = float(os.getenv("ALERT_ESCALATE", "8.0"))
+
 
 def _log_task_exception(task: asyncio.Task) -> None:
     """Fire-and-forget таски молча проглатывают исключения — surfacing их в лог."""
@@ -765,7 +766,7 @@ async def tg_check_spread_alert(ticker: str, spread: float, avg,
 
     abs_spread = abs(spread)
     alert_st   = _tg_alert_state.get(ticker)
-    CLOSE_THRESHOLD = 0.3  # ниже этого — закрываем
+    CLOSE_THRESHOLD = 3.0  # ниже этого — закрываем (гистерезис 3%-5%)
 
     if abs_spread >= ALERT_THRESHOLD:
         if alert_st is None:
@@ -851,30 +852,32 @@ async def tg_bot_polling() -> None:
     offset = 0
     url = f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates"
     log.info("Telegram bot polling started")
-    while True:
-        try:
-            async with aiohttp.ClientSession() as s:
+    async with aiohttp.ClientSession() as s:
+        while True:
+            try:
                 resp = await s.get(
                     url,
                     params={"offset": offset, "timeout": 30, "allowed_updates": '["message"]'},
-                    timeout=aiohttp.ClientTimeout(total=35),
+                    timeout=aiohttp.ClientTimeout(total=40),
                 )
                 data = await resp.json()
-            for update in data.get("result", []):
-                offset = update["update_id"] + 1
-                msg     = update.get("message", {})
-                text    = msg.get("text", "").strip().lower()
-                chat_id = str(msg.get("chat", {}).get("id", ""))
-                log.info("TG incoming: chat=%s text=%r", chat_id, text)
-                if text == "/chart" or text.startswith("/chart@"):
-                    asyncio.create_task(tg_send_top10(chat_id))
-                elif text == "/top10" or text.startswith("/top10@"):
-                    asyncio.create_task(tg_send_top10(chat_id))
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            log.warning("Telegram polling error: %s", e)
-            await asyncio.sleep(5)
+                for update in data.get("result", []):
+                    offset = update["update_id"] + 1
+                    msg     = update.get("message", {})
+                    text    = msg.get("text", "").strip().lower()
+                    chat_id = str(msg.get("chat", {}).get("id", ""))
+                    log.info("TG incoming: chat=%s text=%r", chat_id, text)
+                    if text == "/chart" or text.startswith("/chart@"):
+                        t = asyncio.create_task(tg_send_top10(chat_id))
+                        t.add_done_callback(_log_task_exception)
+                    elif text == "/top10" or text.startswith("/top10@"):
+                        t = asyncio.create_task(tg_send_top10(chat_id))
+                        t.add_done_callback(_log_task_exception)
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                log.warning("Telegram polling error: %s", e)
+                await asyncio.sleep(5)
 
 
 # ══════════════════════════════════════════════════════════════════
