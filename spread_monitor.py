@@ -717,7 +717,7 @@ async def _pinned_top10_loop() -> None:
             await tg_edit(_pinned_msg_id, text)
             log.info("TG pinned top10 updated")
 
-        await asyncio.sleep(3600)  # раз в час
+        await asyncio.sleep(600)  # раз в 10 минут
 
 
 def _format_alert_text(ticker: str, spread: float, avg,
@@ -834,16 +834,18 @@ async def tg_send_top10(chat_id: str = "") -> None:
     lines = ["📊 <b>Топ-10 спредов MEXC vs Stock</b>"]
     for i, (ticker, spread, avg, p_mexc, p_stock) in enumerate(top, 1):
         circle  = "🔴" if spread > 0 else "🟢"
-        action  = "шорт" if spread > 0 else "лонг"
         avg_str = f"{avg:+.3f}%" if avg is not None else "N/A"
         lines.append(
-            f"\n{i}. {circle} <b>{ticker}</b>  {spread:+.3f}%  ({action})\n"
-            f"   MEXC <code>${p_mexc:.4f}</code>  ·  Stock <code>${p_stock:.4f}</code>\n"
-            f"   Avg: <code>{avg_str}</code>\n"
-            f"   ─────────────────────"
+            f"\n{i}. {circle} <b>{ticker}</b>  <code>{spread:+.3f}%</code>"
+            f"  avg <code>{avg_str}</code>\n"
+            f"   MEXC <code>${p_mexc:.2f}</code>  Stock <code>${p_stock:.2f}</code>"
         )
 
-    await tg_send("\n".join(lines), chat_id)
+    text = "\n".join(lines)
+    # Telegram лимит 4096 символов — обрезаем если превышает
+    if len(text) > 4096:
+        text = text[:4090] + "\n…"
+    await tg_send(text, chat_id)
 
 
 async def tg_bot_polling() -> None:
