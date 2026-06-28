@@ -197,15 +197,24 @@ def _load_persisted_state() -> None:
 
 
 def _save_persisted_state() -> None:
+    # Обрезаем историю до последних 7 дней перед сохранением — защита от OOM
+    cutoff = time.time() - 7 * 86400
+    trimmed = {
+        t: [h for h in hist if h["t"] > cutoff]
+        for t, hist in state["spread_history"].items()
+    }
     payload = {
-        "spread_history": state["spread_history"],
+        "spread_history": trimmed,
         "notes": state["notes"],
         "trash": state["trash"],
         "hidden": sorted(_watchlist_hidden),
         "open_columns": state["open_columns"],
     }
+    # Атомарная запись через temp файл — если процесс убьют в момент записи, файл не повредится
+    tmp_path = PERSIST_PATH.with_suffix(".tmp")
     with _state_lock:
-        PERSIST_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp_path.replace(PERSIST_PATH)
 
 
 def _add_trash_ticker(ticker: str) -> None:
@@ -250,8 +259,20 @@ def _record_history(ticker: str, spread: float) -> None:
     now = time.time()
     hist = state["spread_history"].setdefault(ticker, [])
     hist.append({"t": now, "v": round(spread, 4)})
-    cutoff = now - 180 * 86400
-    state["spread_history"][ticker] = [h for h in hist if h["t"] > cutoff]
+
+    # Храним 90 дней максимум
+    cutoff_90 = now - 90 * 86400
+    # Для данных старше 1 дня — прореживаем до 1 точки в 15 минут (экономия памяти)
+    cutoff_1d = now - 86400
+    recent  = [h for h in hist if h["t"] > cutoff_1d]
+    older   = [h for h in hist if cutoff_90 < h["t"] <= cutoff_1d]
+    # Прореживаем старые: оставляем одну точку на 15-минутный слот
+    thinned: dict[int, dict] = {}
+    for h in older:
+        slot = int(h["t"] // 900)
+        thinned[slot] = h  # последняя точка слота
+    state["spread_history"][ticker] = list(thinned.values()) + recent
+
     if now - _last_state_save >= 300:
         _last_state_save = now
         _save_persisted_state()
