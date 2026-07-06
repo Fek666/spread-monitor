@@ -171,6 +171,7 @@ SYMBOL_MAP: dict[str, list[str]] = {
     "COST":      ["COSTSTOCK_USDT"],
     "INFQ":      ["INFQSTOCK_USDT"],
     "CATSTOCK":  ["CATSTOCK_USDT"],
+    "CRWD":  ["CRWDSTOCK_USDT"],
 }
 
 # ─────────────────────────────────────────────
